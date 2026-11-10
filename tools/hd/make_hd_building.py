@@ -13,9 +13,10 @@ S x S real pixels of the source art.
 --body        the 1x enhanced body SHP (normal, damaged, heavy, shadows)
 --anim        optional 1x glow animation SHP (normal loop, then damaged loop)
 
-Pack format (little endian): "CHD1", u32 version=1, u32 scale, u32 canvasW,
+Pack format (little endian): "CHD1", u32 version=2, u32 scale, u32 canvasW,
 u32 canvasH, u32 frameCount, then per frame u32 present and, if present,
-canvasW*S x canvasH*S BGRA pixels (straight alpha).
+canvasW*S x canvasH*S BGRA pixels (straight alpha) followed by the same number
+of team-colour mask bytes (0 = keep the art colour, 255 = player colour).
 """
 import argparse
 import math
@@ -163,9 +164,18 @@ def glow_frames(hd, anim_frames, first, n, damaged, S):
     return frames
 
 
-def write_pack(path, S, W, H, frames):
+def house_mask(frame):
+    """Team-colour pixels: true reds, the same test the 1x conversion uses for
+    palette slots 16-31 (orange glow is excluded). 0..255 per pixel."""
+    r, g, b = frame[..., 0], frame[..., 1], frame[..., 2]
+    mask = (r > 70) & (g < 0.36 * r) & (b < 0.42 * r) & (frame[..., 3] > 0)
+    return (blur(mask.astype(np.float32), 1) * 255).astype(np.uint8)
+
+
+def write_pack(path, S, W, H, frames, house=True):
+    """Version 2: each present frame is BGRA pixels followed by a team-colour mask plane."""
     with open(path, "wb") as out:
-        out.write(b"CHD1" + struct.pack("<5I", 1, S, W, H, len(frames)))
+        out.write(b"CHD1" + struct.pack("<5I", 2, S, W, H, len(frames)))
         for frame in frames:
             if frame is None:
                 out.write(struct.pack("<I", 0))
@@ -174,6 +184,8 @@ def write_pack(path, S, W, H, frames):
             rgba = np.clip(np.round(frame), 0, 255).astype(np.uint8)
             bgra = rgba[..., [2, 1, 0, 3]]
             out.write(bgra.tobytes())
+            mask = house_mask(np.clip(frame, 0, 255)) if house else np.zeros(frame.shape[:2], np.uint8)
+            out.write(mask.tobytes())
     print("wrote %s (%d frames, %dx%d)" % (path, len(frames), W * S, H * S))
 
 
@@ -220,7 +232,7 @@ def main():
         n = len(anim) // 2
         glow = glow_frames(hd, anim, 0, n, False, S) + glow_frames(damaged if damaged is not None else hd, anim, n, n, True, S)
         aname = os.path.splitext(os.path.basename(args.anim))[0].lower()
-        write_pack(os.path.join(args.out, aname + ".hdspr"), S, W, H, glow)
+        write_pack(os.path.join(args.out, aname + ".hdspr"), S, W, H, glow, house=False)
 
 
 if __name__ == "__main__":

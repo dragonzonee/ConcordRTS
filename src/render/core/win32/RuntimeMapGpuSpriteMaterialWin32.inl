@@ -21,8 +21,9 @@ static bool runtimeGpuCaptureSpriteMaterial(const RuntimeShpFrameImage& image,co
         m.litColors=list->internValues<std::array<std::uint32_t,256>>(lit);if(ownerRemap)m.litRemapColors=list->internValues<std::array<std::uint32_t,256>>(litRemap);}
     if(soften)m.flags|=Material::Soften;if(context.chaosBodyTint)m.flags|=Material::Chaos;m.airstrike=context.airstrikeBodyColorAdd;
     // HD sprite pack: true-colour pixels sampled by the GPU when rendering at HdScale > 1.
-    if(const auto* hdPixels=concord::render::hd::hdSpriteFramePixels(image.sourcePath,image.frameIndex,image.offsetX,image.offsetY,
+    if(const auto* hd=concord::render::hd::hdSpriteFramePixels(image.sourcePath,image.frameIndex,image.offsetX,image.offsetY,
             image.width,image.height,image.globalWidth,image.globalHeight)){
-        m.flags|=Material::Hd;m.hdPixels=list->internValues<std::uint32_t>(*hdPixels);}
+        m.flags|=Material::Hd;if(hd->houseMask&&ownerRemap)m.flags|=Material::HdHouse;   // team colour on the HD art
+        m.hdPixels=list->internValues<std::uint32_t>(hd->data);}
     *runtimeGpuSpriteMaterialCapture=list->internValues<Material>({&m,1});++runtimeGpuSpriteMaterialCaptures;return true;
 }

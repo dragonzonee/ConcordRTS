@@ -17695,6 +17695,40 @@ unsigned char runtimeBlendIndexedChannel(
     );
 }
 
+// GPU map path: an opaque image drawn into the recording overlay DC becomes one
+// BGRA command instead of a GDI blit. Blits embed the whole bitmap in the
+// overlay metafile, which is then replayed twice every frame (the sidebar alone
+// cost ~20 ms a frame). False = not recording; draw with GDI as usual.
+bool runtimeEmitNativeOpaqueImage(HDC dc, int x, int y, int width, int height,
+    const std::uint32_t* pixels, int strideWords) {
+    auto* native = concord::ui::win32::MapNativeOverlayWin32::current();
+    auto* list = native && native->dc() == dc ? native->drawList() : nullptr;
+    if (!list || !pixels || width <= 0 || height <= 0) return false;
+    concord::render::MapDrawCommand c;
+    c.left = std::max(0, x);
+    c.top = std::max(0, y);
+    c.right = std::min(native->width(), x + width);
+    c.bottom = std::min(native->height(), y + height);
+    if (c.left >= c.right || c.top >= c.bottom) return true;
+    try {
+        std::vector<std::uint32_t> copy(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+        for (int row = 0; row < height; ++row)
+            std::copy_n(pixels + static_cast<std::size_t>(row) * static_cast<std::size_t>(strideWords), width,
+                copy.data() + static_cast<std::size_t>(row) * static_cast<std::size_t>(width));
+        c.kind = concord::render::MapDrawKind::Bgra;
+        c.originX = x;
+        c.originY = y;
+        c.width = static_cast<std::uint32_t>(width);
+        c.height = static_cast<std::uint32_t>(height);
+        c.stride = c.width * 4;
+        c.offset = list->internValues<std::uint32_t>(copy);
+        (void)native->emit(c);
+    } catch (...) {
+        native->reject("native-opaque-image-budget");
+    }
+    return true;
+}
+
 bool drawRuntimeIndexedImage(
     HDC dc,
     const RECT& rect,
@@ -17898,6 +17932,9 @@ bool drawRuntimeIndexedImage(
                     | (static_cast<std::uint32_t>(color.r) << 16);
             }
         }
+        if (runtimeEmitNativeOpaqueImage(dc, startX, startY, drawWidth, drawHeight, rgbaPixels.data(), drawWidth)) {
+            return true;
+        }
 
         BITMAPINFO bitmapInfo{};
         bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -17923,9 +17960,10 @@ bool drawRuntimeIndexedImage(
         return true;
     }
 
-    // GPU map path: the destination can't be read back, so a translucent image
-    // becomes one constant-alpha blend command (transparent pixels masked out).
-    if (sourceAlpha < runtimeIndexedOpaqueAlpha) {
+    // GPU map path: instead of one SetPixelV per pixel (each a metafile record
+    // replayed twice per frame) or a destination read-back (unsupported), the
+    // image becomes one masked command: opaque copy, or constant-alpha blend.
+    {
         auto* native = concord::ui::win32::MapNativeOverlayWin32::current();
         auto* list = native && native->dc() == dc ? native->drawList() : nullptr;
         if (list) {
@@ -17958,14 +17996,15 @@ bool drawRuntimeIndexedImage(
             c.bottom = std::min(native->height(), startY + drawHeight);
             if (c.left >= c.right || c.top >= c.bottom) return true;
             try {
-                c.kind = concord::render::MapDrawKind::Blend;
+                const bool opaque = sourceAlpha >= runtimeIndexedOpaqueAlpha;
+                c.kind = opaque ? concord::render::MapDrawKind::Bgra : concord::render::MapDrawKind::Blend;
                 c.originX = startX;
                 c.originY = startY;
                 c.width = static_cast<std::uint32_t>(drawWidth);
                 c.height = static_cast<std::uint32_t>(drawHeight);
                 c.stride = c.width * 4;
                 c.flags = 1;
-                c.parameter = static_cast<std::uint32_t>(std::min(255, sourceAlpha * 255 / runtimeIndexedOpaqueAlpha));
+                c.parameter = opaque ? 0U : static_cast<std::uint32_t>(std::min(255, sourceAlpha * 255 / runtimeIndexedOpaqueAlpha));
                 c.offset = list->internValues<std::uint32_t>(bgra);
                 c.auxiliary = list->intern(mask);
                 (void)native->emit(c);
@@ -19715,6 +19754,13 @@ bool drawRuntimeSidebarStaticCache(
         state.sidebarStaticKey = key;
     }
 
+    // GPU map path: hand the cached sidebar pixels over directly (see
+    // runtimeEmitNativeOpaqueImage); the DIB is top-down, width words per row.
+    if (state.sidebarStaticBuffer.pixels != nullptr && GdiFlush()
+        && runtimeEmitNativeOpaqueImage(dc, sidebar.left, sidebar.top, width, height,
+            static_cast<const std::uint32_t*>(state.sidebarStaticBuffer.pixels), state.sidebarStaticBuffer.width)) {
+        return true;
+    }
     return BitBlt(
         dc,
         sidebar.left,

@@ -41,6 +41,10 @@ struct NativeOverlayCompilation {
     std::unordered_map<std::uint32_t,std::uint32_t> constantSeeds;
     std::uint32_t identitySeed=UINT32_MAX;
     bool fullReplayReference=false,pendingNeedsExact=false,hasPaths=false;
+    // false = the 2-pass (black/white background) reconstruction for every op:
+    // exact for opaque copies, approximate on anti-aliased edges, ~100x cheaper
+    // than the 256-pass exact lookup.
+    bool exactSamplesAllowed=true;
     std::vector<unsigned char> exactSampleMask;
     std::unordered_set<std::uint32_t> pinnedTables;
     std::uint64_t scratchBytes=0,nativePixels=0;
@@ -76,6 +80,9 @@ struct NativeOverlayCompilation {
     bool scan(const ENHMETARECORD* record) {
         if(failed)return false;
         if(record->nSize<sizeof(EMR)){fail("native-record-size");return false;}
+        if(record->nSize>32768&&record->nSize>=sizeof(EMR)+sizeof(RECT)&&nativeDiagnosticFlag("CONCORD_NATIVE_PROFILE")){
+            static int logged=0;if(logged<40){++logged;RECT r{};std::memcpy(&r,reinterpret_cast<const unsigned char*>(record)+sizeof(EMR),sizeof(r));
+                std::fprintf(stderr,"Native large record type=%lu bytes=%lu bounds=%ld,%ld-%ld,%ld layer=%zu\n",record->iType,record->nSize,r.left,r.top,r.right,r.bottom,layers.size());}}
         switch(record->iType){case EMR_BEGINPATH:case EMR_ENDPATH:case EMR_CLOSEFIGURE:case EMR_ABORTPATH:case EMR_FLATTENPATH:case EMR_WIDENPATH:case EMR_SELECTCLIPPATH:hasPaths=true;break;default:break;}
         switch(record->iType) {
         case EMR_GDICOMMENT: {
@@ -136,7 +143,8 @@ struct NativeOverlayCompilation {
         case EMR_EXTTEXTOUTA:case EMR_EXTTEXTOUTW:case EMR_POLYTEXTOUTA:case EMR_POLYTEXTOUTW:
         case EMR_ALPHABLEND:case EMR_TRANSPARENTBLT:case EMR_GRADIENTFILL: {
             if(record->nSize<sizeof(EMR)+sizeof(RECT)){fail("native-bounds-size");return false;}
-            RECT r{};std::memcpy(&r,reinterpret_cast<const unsigned char*>(record)+sizeof(EMR),sizeof(r));dirty(r,nativeNeedsExactSamples(record->iType));return !failed;
+            RECT r{};std::memcpy(&r,reinterpret_cast<const unsigned char*>(record)+sizeof(EMR),sizeof(r));
+            dirty(r,exactSamplesAllowed&&nativeNeedsExactSamples(record->iType));return !failed;
         }
         case EMR_HEADER:case EMR_EOF:case EMR_SETBRUSHORGEX:case EMR_SETBKMODE:case EMR_SETPOLYFILLMODE:
         case EMR_SETROP2:case EMR_SETSTRETCHBLTMODE:case EMR_SETTEXTALIGN:case EMR_SETTEXTCOLOR:case EMR_SETBKCOLOR:

@@ -34,6 +34,13 @@ struct RuntimeAutoplayRun {
     int maxTicks = 54000;       // safety stop: 30 minutes of game time
     int maxSeconds = 900;       // safety stop in real time (ticks freeze at match end)
     bool matchOverLogged = false;
+    struct Profile {
+        std::chrono::steady_clock::time_point started;
+        int tick = 0, samples = 0;
+        std::uint64_t presented = 0;
+        double paintMs = 0, mapMs = 0, overlayMs = 0, sidebarMs = 0, compileMs = 0, uploadMs = 0, presentMs = 0, gpuMs = 0, loopMs = 0;
+        std::chrono::steady_clock::time_point last;
+    } profile;
     int passedSteps = 0;
     std::map<std::size_t, int> loops;   // RepeatUntil step index -> jumps taken
     bool done = false;
@@ -761,6 +768,45 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         autoplayLeftClick(window, p);
         nextRuntimeAutoplayStep(run, state, "clicked target at " + std::to_string(p.x) + "," + std::to_string(p.y));
         run.waitFrames = 2;
+        return true;
+    }
+    if (verb == "profile") {
+        // Profile N: average the frame cost parts over N loop passes.
+        int frames = 60;
+        if (!a.empty()) autoplayInt(a[0], frames);
+        auto& p = run.profile;
+        const auto now = std::chrono::steady_clock::now();
+        if (run.phase == 0) {
+            p = {};
+            p.started = p.last = now;
+            p.tick = state.tick;
+            p.presented = state.d3d11Presenter ? state.d3d11Presenter->report().presented : 0;
+            run.phase = 1;
+            return true;
+        }
+        p.loopMs = std::max(p.loopMs, std::chrono::duration<double, std::milli>(now - p.last).count());
+        p.last = now;
+        p.paintMs += state.perf.lastPaintMs;
+        p.mapMs += state.perf.lastMapDrawMs;
+        p.overlayMs += state.perf.lastOverlayDrawMs;
+        p.sidebarMs += state.perf.lastSidebarDrawMs;
+        p.compileMs += state.mapComposition.native().report().compileMs;
+        if (state.d3d11Presenter && state.d3d11Presenter->timingCount()) {
+            const auto& t = state.d3d11Presenter->timings()[state.d3d11Presenter->timingCount() - 1];
+            p.uploadMs += t.uploadCpuMs; p.presentMs += t.presentCpuMs; p.gpuMs += t.gpuValid ? t.gpuUploadMs : 0.0;
+        }
+        if (++p.samples < frames) return true;
+        const double seconds = std::chrono::duration<double>(now - p.started).count();
+        const auto presented = state.d3d11Presenter ? state.d3d11Presenter->report().presented - p.presented : 0;
+        std::ostringstream out;
+        out.setf(std::ios::fixed);
+        out.precision(1);
+        out << "loop=" << p.samples / seconds << "/s frames=" << presented / seconds << "/s ticks=" << (state.tick - p.tick) / seconds
+            << "/s worstLoopMs=" << p.loopMs << " | avg ms: paint=" << p.paintMs / p.samples << " mapPrep=" << p.mapMs / p.samples
+            << " unitOverlay=" << p.overlayMs / p.samples << " sidebar=" << p.sidebarMs / p.samples
+            << " overlayCompile=" << p.compileMs / p.samples << " upload=" << p.uploadMs / p.samples
+            << " present=" << p.presentMs / p.samples << " gpu=" << p.gpuMs / p.samples;
+        nextRuntimeAutoplayStep(run, state, out.str());
         return true;
     }
     if (verb == "cameraon") {

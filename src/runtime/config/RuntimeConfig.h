@@ -132,6 +132,9 @@ struct RuntimeConfig {
     // HD render scale (1 = off, 2..4): the map is rendered S times larger and
     // HD sprite packs from <local data>/hd are sampled at full detail.
     int hdScale = 1;
+    // GPU map overlay (text/UI) reconstruction: 1 = exact 256-pass, 0 = fast
+    // 2-pass, -1 = auto (fast when hdScale > 1).
+    int exactOverlay = -1;
 };
 
 struct RuntimeConfigOverrides {

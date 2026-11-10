@@ -77,12 +77,13 @@ public:
         const auto materialValid=[&](std::uint32_t offset,std::uint32_t w=0,std::uint32_t h=0) {
             if(offset%4||!region(offset,sizeof(MapSpriteMaterial)))return false;MapSpriteMaterial m;
             std::memcpy(&m,reinterpret_cast<const unsigned char*>(resources_.data())+offset,sizeof(m));
-            if(!m.width||!m.height||m.width>maxExtent||m.height>maxExtent||m.flags>63||m.airstrike>65535
-                ||(!(m.flags&MapSpriteMaterial::Hd)&&m.hdPixels)
+            if(!m.width||!m.height||m.width>maxExtent||m.height>maxExtent||m.flags>127||m.airstrike>65535
+                ||(!(m.flags&MapSpriteMaterial::Hd)&&(m.hdPixels||(m.flags&MapSpriteMaterial::HdHouse)))
+                ||((m.flags&MapSpriteMaterial::HdHouse)&&!(m.flags&MapSpriteMaterial::Owner))
                 ||(w&&(m.width!=w||m.height!=h))||((m.flags&MapSpriteMaterial::Mask)&&!(m.flags&MapSpriteMaterial::Owner)))return false;
             const auto area=static_cast<std::uint64_t>(m.width)*m.height;
             const auto hdScale=static_cast<std::uint64_t>(hd::hdRenderScale());
-            if((m.flags&MapSpriteMaterial::Hd)&&(hdScale<2||m.hdPixels%4||!region(m.hdPixels,area*4*hdScale*hdScale)))return false;
+            if((m.flags&MapSpriteMaterial::Hd)&&(hdScale<2||m.hdPixels%4||!region(m.hdPixels,area*5*hdScale*hdScale)))return false;
             if(!region(m.indices,area)||m.baseColors%4||!region(m.baseColors,1024))return false;
             if((m.flags&MapSpriteMaterial::Owner)&&(m.remapColors%4||!region(m.remapColors,1024)))return false;
             if((m.flags&MapSpriteMaterial::Mask)&&!region(m.remapMask,area))return false;

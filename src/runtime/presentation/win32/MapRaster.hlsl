@@ -45,8 +45,20 @@ bool spriteHd(uint material,uint sourceIndex,out uint4 texel) {
     texel=uint4(0,0,0,0);
     if(gHdScale<2U||(resources.Load(material+36U)&32U)==0U)return false;
     uint w=resources.Load(material),x=sourceIndex%w,y=sourceIndex/w,stride=w*gHdScale;
-    uint at=(y*gHdScale+uint(gHdSub.y))*stride+x*gHdScale+uint(gHdSub.x);
-    texel=unpack(resources.Load(resources.Load(material+44U)+at*4U));return true;
+    uint at=(y*gHdScale+uint(gHdSub.y))*stride+x*gHdScale+uint(gHdSub.x),base=resources.Load(material+44U);
+    texel=unpack(resources.Load(base+at*4U));
+    if((resources.Load(material+36U)&64U)!=0U){
+        // Team colour: house pixels take the owner remap colour (palette slots
+        // 16..31, brightest first) at the art's brightness, like the 1x sprite.
+        uint count=stride*resources.Load(material+4U)*gHdScale,mask=byteAt(base+count*4U+at);
+        if(mask!=0U){
+            float lum=float(max(texel.x,max(texel.y,texel.z)))/255.0;
+            uint slot=16U+uint(clamp(round((1.0-pow(lum,0.8))*15.0),0.0,15.0));
+            uint3 house=unpack(resources.Load(resources.Load(material+24U)+slot*4U)).xyz;
+            texel.xyz=(house*mask+texel.xyz*(255U-mask)+127U)/255U;
+        }
+    }
+    return true;
 }
 uint4 compose(int2 p,uint first,uint last,uint4 color) {
     uint4 saved[8];uint savedCount=0U;

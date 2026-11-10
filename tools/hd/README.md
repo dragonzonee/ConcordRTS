@@ -42,9 +42,25 @@ the HD art's glowing pixels with the same pulse as the 1x loop.
 `tests/autoplay/hd_power_plant.ini` builds two Power Plants at `HdScale=3`
 and saves `power_plants_hd.bmp`, the full 3840x2160 frame.
 
+## Playing in 4K
+
+`[Runtime] HdScale=3` in `local_data/runtime_config.ini` (1280x720 x 3 =
+3840x2160): the battle window becomes borderless full screen; menus keep their
+size. Team colour: the pack's mask plane marks house-colour pixels, which take
+the owner's remap colour (palette slots 16-31) at the art's brightness.
+
+## Performance notes
+
+The GPU map path rebuilds a GDI "overlay" (UI, text, bars) for the GPU every
+frame. It used to cost 50-350 ms: an exact 256-pass reconstruction plus big
+sidebar/radar blits and per-pixel `SetPixelV` cameos embedded in the overlay
+metafile. Now: 2-pass reconstruction when HD is on (`ExactOverlay=yes` restores
+the exact one), and opaque/translucent images are sent as GPU commands. A 4K
+battle runs ~35 FPS (vsync at 60 Hz needs < 16.7 ms; today ~26 ms: map prep 6,
+overlay 5, upload 3, present 2). `Profile N` in an autoplay script measures it;
+`CONCORD_NATIVE_PROFILE=1` prints overlay compile details.
+
 ## Known gaps
 
-- The live window still shows the HD frame scaled down to the window size;
-  a full-screen 4K window needs input coordinates scaled too.
-- HD art ignores team colour (the 1x sprite remaps the house colour range).
-- Build-up frames stay 1x; the GPU map path is slow at 4K (a few FPS).
+- Build-up frames stay 1x.
+- 60 FPS needs sprite materials and GPU resources cached across frames.

@@ -1,6 +1,7 @@
 #include "runtime/host/RuntimeShell.h"
 #include "runtime/autoplay/RuntimeAutoplayScript.h"
 #include "render/hd/RuntimeHdSprites.h"
+#include "ui/surface/win32/MapNativeOverlayWin32.h"
 #include <filesystem>
 #include "data/campaign/CampaignDatabase.h"
 #include "ui/main_menu/RuntimeMainMenu.h"
@@ -834,6 +835,10 @@ int runRuntimeApplication(int argc, char** argv) {
     // HD sprite packs live in <local data>/hd; the scale applies to map frames.
     concord::render::hd::configureHdSprites(
         std::filesystem::path(config.localDataRootPath) / "hd", config.hdScale);
+    // The exact 256-pass overlay reconstruction re-runs on every UI change and
+    // costs 50-350 ms a frame; HD play uses the 2-pass one unless asked.
+    const bool exactOverlay = config.exactOverlay == 1 || (config.exactOverlay < 0 && config.hdScale <= 1);
+    concord::ui::win32::MapNativeOverlayWin32::setExactSampling(exactOverlay);
     if (config.hdScale > 1) {
         std::cout << "HD render scale " << concord::render::hd::hdRenderScale() << "x, packs from "
                   << (std::filesystem::path(config.localDataRootPath) / "hd").string() << "\n";

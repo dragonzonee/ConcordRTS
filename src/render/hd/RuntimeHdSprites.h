@@ -33,14 +33,23 @@ struct HdSpritePack {
     int scale = 0;
     int canvasWidth = 0;
     int canvasHeight = 0;
-    std::vector<std::vector<std::uint32_t>> frames;   // empty = no HD for that frame
+    bool houseMask = false;                                 // version 2: team-colour plane per frame
+    std::vector<std::vector<std::uint32_t>> frames;         // empty = no HD for that frame
+    std::vector<std::vector<unsigned char>> masks;          // team-colour mask per frame (v2)
+};
+
+// A cropped HD frame as the GPU reads it: (w*S)x(h*S) BGRA words, then the
+// same number of team-colour mask bytes (zeros when the pack has none).
+struct HdSpriteFrame {
+    std::vector<std::uint32_t> data;
+    bool houseMask = false;
 };
 
 struct HdSpriteState {
     int scale = 1;
     std::filesystem::path root;
     std::unordered_map<std::string, std::shared_ptr<HdSpritePack>> packs;   // null = no pack
-    std::unordered_map<std::string, std::shared_ptr<std::vector<std::uint32_t>>> crops;
+    std::unordered_map<std::string, std::shared_ptr<HdSpriteFrame>> crops;
     std::string capturePath;   // pending back-buffer capture request (BMP)
 };
 
@@ -95,21 +104,27 @@ inline std::shared_ptr<HdSpritePack> loadHdSpritePack(const std::string& name) {
     char magic[4]{};
     if (in && in.read(magic, 4) && std::string(magic, 4) == "CHD1"
         && in.read(reinterpret_cast<char*>(header), sizeof(header) - 4)
-        && header[0] == 1 && static_cast<int>(header[1]) == s.scale
+        && (header[0] == 1 || header[0] == 2) && static_cast<int>(header[1]) == s.scale
         && header[2] > 0 && header[3] > 0 && header[2] <= 4096 && header[3] <= 4096 && header[4] <= 4096) {
         auto loaded = std::make_shared<HdSpritePack>();
         loaded->scale = static_cast<int>(header[1]);
         loaded->canvasWidth = static_cast<int>(header[2]);
         loaded->canvasHeight = static_cast<int>(header[3]);
+        loaded->houseMask = header[0] >= 2;
         loaded->frames.resize(header[4]);
+        loaded->masks.resize(header[4]);
         const std::size_t pixels = static_cast<std::size_t>(header[2]) * header[3] * header[1] * header[1];
         bool ok = true;
-        for (auto& frame : loaded->frames) {
+        for (std::size_t i = 0; i < loaded->frames.size(); ++i) {
             std::uint32_t present = 0;
             if (!in.read(reinterpret_cast<char*>(&present), 4)) { ok = false; break; }
             if (!present) continue;
-            frame.resize(pixels);
-            if (!in.read(reinterpret_cast<char*>(frame.data()), static_cast<std::streamsize>(pixels * 4))) { ok = false; break; }
+            loaded->frames[i].resize(pixels);
+            if (!in.read(reinterpret_cast<char*>(loaded->frames[i].data()), static_cast<std::streamsize>(pixels * 4))) { ok = false; break; }
+            if (loaded->houseMask) {
+                loaded->masks[i].resize(pixels);
+                if (!in.read(reinterpret_cast<char*>(loaded->masks[i].data()), static_cast<std::streamsize>(pixels))) { ok = false; break; }
+            }
         }
         if (ok) pack = std::move(loaded);
     }
@@ -118,8 +133,8 @@ inline std::shared_ptr<HdSpritePack> loadHdSpritePack(const std::string& name) {
 }
 
 // HD pixels for one decoded SHP frame, cropped to the frame's box:
-// (width*S) x (height*S) BGRA, or null when there is no HD art for it.
-inline const std::vector<std::uint32_t>* hdSpriteFramePixels(const std::string& sourcePath, int frameIndex,
+// (width*S) x (height*S) BGRA + mask bytes, or null when there is no HD art for it.
+inline const HdSpriteFrame* hdSpriteFramePixels(const std::string& sourcePath, int frameIndex,
     int offsetX, int offsetY, int width, int height, int canvasWidth, int canvasHeight) {
     auto& s = hdSpriteState();
     if (s.scale <= 1 || frameIndex < 0 || width <= 0 || height <= 0 || s.root.empty()) return nullptr;
@@ -131,17 +146,23 @@ inline const std::vector<std::uint32_t>* hdSpriteFramePixels(const std::string& 
     if (hdTraceEnabled())
         std::fprintf(stderr, "HD lookup %s (from %s) frame=%d box=%d,%d %dx%d canvas=%dx%d\n", name.c_str(), sourcePath.c_str(),
             frameIndex, offsetX, offsetY, width, height, canvasWidth, canvasHeight);
-    std::shared_ptr<std::vector<std::uint32_t>> crop;
+    std::shared_ptr<HdSpriteFrame> crop;
     const auto pack = loadHdSpritePack(name);
     if (pack && pack->canvasWidth == canvasWidth && pack->canvasHeight == canvasHeight
         && frameIndex < static_cast<int>(pack->frames.size()) && !pack->frames[frameIndex].empty()
         && offsetX >= 0 && offsetY >= 0 && offsetX + width <= canvasWidth && offsetY + height <= canvasHeight) {
         const int S = pack->scale, stride = canvasWidth * S, w = width * S, h = height * S;
-        crop = std::make_shared<std::vector<std::uint32_t>>(static_cast<std::size_t>(w) * h);
+        const std::size_t count = static_cast<std::size_t>(w) * h;
+        crop = std::make_shared<HdSpriteFrame>();
+        crop->data.assign(count + (count + 3) / 4, 0);
         const auto& source = pack->frames[frameIndex];
+        const auto& mask = pack->masks[frameIndex];
+        crop->houseMask = !mask.empty();
+        auto* maskOut = reinterpret_cast<unsigned char*>(crop->data.data() + count);
         for (int y = 0; y < h; ++y) {
-            const auto* row = source.data() + static_cast<std::size_t>(offsetY * S + y) * stride + offsetX * S;
-            std::copy(row, row + w, crop->data() + static_cast<std::size_t>(y) * w);
+            const std::size_t from = static_cast<std::size_t>(offsetY * S + y) * stride + offsetX * S;
+            std::copy(source.data() + from, source.data() + from + w, crop->data.data() + static_cast<std::size_t>(y) * w);
+            if (!mask.empty()) std::copy(mask.data() + from, mask.data() + from + w, maskOut + static_cast<std::size_t>(y) * w);
         }
     }
     s.crops.emplace(key, crop);

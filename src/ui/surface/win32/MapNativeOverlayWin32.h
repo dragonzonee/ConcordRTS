@@ -43,6 +43,9 @@ public:
     HDC dc() const noexcept;
     const MapNativeOverlayReport& report() const noexcept;
     static MapNativeOverlayWin32* current() noexcept;
+    // Exact (256-pass) reconstruction of text/blit pixels; false = 2-pass.
+    static void setExactSampling(bool exact) noexcept;
+    static bool exactSampling() noexcept;
     static COLORREF readPixel(HDC,int,int,std::source_location where=std::source_location::current()) noexcept;
     static COLORREF setBrushColor(HDC,COLORREF) noexcept;
     static COLORREF setPenColor(HDC,COLORREF) noexcept;

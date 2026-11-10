@@ -30,7 +30,7 @@ struct MapNativeOverlayWin32::Impl {
     std::vector<NativeOverlayLayer> cacheLayers;
     std::vector<NativeOverlayTable> cacheTables;
     std::uint64_t cacheScratch=0,cachePixels=0;
-    bool failed=false,cacheFullReplay=false;
+    bool failed=false,cacheFullReplay=false,cacheExact=true;
     std::array<DWORD,4> fontEnvironment{},cachedFontEnvironment{};
     bool ownsThread() const noexcept {return thread==GetCurrentThreadId();}
     void fail(const char* reason) noexcept {
@@ -88,15 +88,19 @@ struct MapNativeOverlayWin32::Impl {
         if(GetEnhMetaFileBits(closed,count,bytes.data())!=count){fail("native-emf-bytes");return false;}
         report.emfBytes=count;
         const bool fullReplay=nativeDiagnosticFlag("CONCORD_S41_NATIVE_FULL_REPLAY");
-        if(cacheWidth==width&&cacheHeight==height&&cacheFullReplay==fullReplay&&fontEnvironment==cachedFontEnvironment&&bytes==cacheEmf) {
+        const bool exact=MapNativeOverlayWin32::exactSampling();
+        if(cacheWidth==width&&cacheHeight==height&&cacheFullReplay==fullReplay&&cacheExact==exact&&fontEnvironment==cachedFontEnvironment&&bytes==cacheEmf) {
             report.cacheHit=true;report.segments=static_cast<std::uint32_t>(cacheLayers.size());report.lookupGroups=static_cast<std::uint32_t>(cacheTables.size());
             report.lookupBytes=cacheTables.size()*1024;report.scratchBytes=cacheScratch;report.nativePixels=cachePixels;
             return install(cacheLayers,cacheTables);
         }
         if(probe&&probe->failAllocation){fail("native-allocation-injected");return false;}
-        NativeOverlayCompilation data;data.width=width;data.height=height;data.fullReplayReference=fullReplay;
+        using ProfileClock=std::chrono::steady_clock;const auto t0=ProfileClock::now();
+        NativeOverlayCompilation data;data.width=width;data.height=height;data.fullReplayReference=fullReplay;data.exactSamplesAllowed=exact;
         if(!EnumEnhMetaFile(nullptr,closed,scanNativeOverlay,&data,nullptr)||data.failed) {fail(data.failure?data.failure:"native-scan");return false;}
+        const auto t1=ProfileClock::now();
         if(!data.allocate()){fail(data.failure?data.failure:"native-scratch-budget");return false;}
+        const auto t2=ProfileClock::now();
         if(!replaySurface.ensure(metaReference_,width,height)){fail("native-replay-DIB");return false;}
         data.surface=reinterpret_cast<std::uint32_t*>(replaySurface.writablePixels());
         const RECT destination{0,0,width,height};
@@ -115,15 +119,21 @@ struct MapNativeOverlayWin32::Impl {
                 fail(data.failure?data.failure:"native-replay");return false;
             }
         }
+        const auto t3=ProfileClock::now();
         report.segments=static_cast<std::uint32_t>(data.layers.size());report.lookupGroups=static_cast<std::uint32_t>(data.tables.size());
         report.lookupBytes=data.tables.size()*1024;report.scratchBytes=data.scratchBytes;report.nativePixels=data.nativePixels;
         if(!install(data.layers,data.tables)){if(!failed)fail("native-frame-values");return false;}
+        if(nativeDiagnosticFlag("CONCORD_NATIVE_PROFILE")){static int compiles=0;if(++compiles%30==0){
+            const auto ms=[](auto a,auto b){return std::chrono::duration<double,std::milli>(b-a).count();};
+            std::size_t nonEmpty=0;for(const auto& layer:data.layers)nonEmpty+=layer.pixels.empty()?0:1;
+            std::fprintf(stderr,"Native profile emf=%lu scan=%.2f alloc=%.2f replay=%.2f install=%.2f layers=%zu nonEmpty=%zu pixels=%llu tables=%zu\n",
+                count,ms(t0,t1),ms(t1,t2),ms(t2,t3),ms(t3,ProfileClock::now()),data.layers.size(),nonEmpty,static_cast<unsigned long long>(data.nativePixels),data.tables.size());}}
         std::uint64_t sensitivePixels=0;for(auto& layer:data.layers){sensitivePixels+=layer.sensitivePixels.size();std::vector<std::uint32_t>().swap(layer.zero);std::vector<NativeSensitivePixel>().swap(layer.sensitivePixels);}
         if(nativeDiagnosticFlag("CONCORD_S41_NATIVE_DIAGNOSTICS"))std::fprintf(stderr,"Native compilation stats fullReference=%d passes=%d exactMaskBytes=%zu sensitivePixels=%llu nativePixels=%llu scratchBytes=%llu\n",static_cast<int>(fullReplay),passCount,data.exactSampleMask.capacity(),static_cast<unsigned long long>(sensitivePixels),static_cast<unsigned long long>(data.nativePixels),static_cast<unsigned long long>(data.scratchBytes));
         std::uint64_t cached=bytes.size()+data.tables.size()*1024;
         for(const auto& layer:data.layers)cached+=layer.pixels.size()*sizeof(NativePixelDescriptor)+sizeof(NativeOverlayLayer);
         if(cached<=MapDrawList::maxBytes) {
-            cacheWidth=width;cacheHeight=height;cacheFullReplay=fullReplay;cachedFontEnvironment=fontEnvironment;
+            cacheWidth=width;cacheHeight=height;cacheFullReplay=fullReplay;cacheExact=exact;cachedFontEnvironment=fontEnvironment;
             cacheEmf=std::move(bytes);cacheLayers=std::move(data.layers);cacheTables=std::move(data.tables);
             cacheScratch=report.scratchBytes;cachePixels=report.nativePixels;
         }else {cacheEmf.clear();cacheLayers.clear();cacheTables.clear();cacheWidth=cacheHeight=0;}
@@ -200,6 +210,9 @@ bool MapNativeOverlayWin32::active() const noexcept {return impl_&&impl_->ownsTh
 HDC MapNativeOverlayWin32::dc() const noexcept {return impl_&&impl_->ownsThread()?impl_->meta:nullptr;}
 const MapNativeOverlayReport& MapNativeOverlayWin32::report() const noexcept {static const MapNativeOverlayReport empty;return impl_?impl_->report:empty;}
 MapNativeOverlayWin32* MapNativeOverlayWin32::current() noexcept {return currentMapNative;}
+namespace {bool nativeExactSampling=true;}
+void MapNativeOverlayWin32::setExactSampling(bool exact) noexcept {nativeExactSampling=exact;}
+bool MapNativeOverlayWin32::exactSampling() noexcept {return nativeExactSampling;}
 void MapNativeOverlayWin32::release() noexcept {if(!impl_||!impl_->ownsThread())return;cancel();impl_->replaySurface.release();impl_->cacheEmf.clear();impl_->cacheLayers.clear();impl_->cacheTables.clear();impl_->cacheWidth=impl_->cacheHeight=0;}
 void MapNativeOverlayWin32::reject(const char* reason) noexcept {if(impl_&&impl_->ownsThread())impl_->fail(reason);}
 MapDrawList* MapNativeOverlayWin32::drawList() noexcept {return active()?impl_->list:nullptr;}

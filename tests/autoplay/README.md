@@ -52,6 +52,7 @@ MaxTicks=30000        ; safety stop (30 ticks = 1 second of game time)
 | `AttackTarget [Any\|Structure\|Unit\|TYPE]` | Clicks the enemy object nearest to the selection; remembered as the target |
 | `Camera X Y` | Centres the view on a cell |
 | `CameraOn TYPE [N]` | Centres the view on your N-th object of TYPE |
+| `Profile N` | Logs loop/frame/tick rates and average ms per frame part over N frames |
 | `Click X Y` / `RightClick X Y` | Raw click at window coordinates |
 | `Key K` | Presses a key (`Esc`, `Enter`, `Space`, a letter) |
 | `WaitTicks N` / `WaitFrames N` | Waits game ticks / loop passes |

@@ -168,6 +168,9 @@ RuntimeConfig loadRuntimeConfig(const RuntimeConfigOverrides& overrides) {
                 ini.getValue("Runtime", "HdScale", ""),
                 config.hdScale
             );
+            if (const std::string exact = ini.getValue("Runtime", "ExactOverlay", ""); !exact.empty()) {
+                config.exactOverlay = parseRuntimeBool(exact) ? 1 : 0;
+            }
             config.showMainMenu = parseRuntimeBool(
                 ini.getValue(
                     "Runtime",
