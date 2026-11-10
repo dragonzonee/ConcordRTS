@@ -44,6 +44,20 @@ theater name: copy `art/ggpowr_a.shp` to `art/gapowr_a.shp` and
 `ggpowr_a.hdspr` to `gapowr_a.hdspr`, or the stock arcs draw over the damaged
 plant. Damaged buildings also show the shared stock fires `fire01..03.shp`.
 
+## Build-up animation from artist frames
+
+```
+python tools/hd/make_hd_buildup.py --frames "buildup_source/buildup_*.webp" ^
+  --stock-body <stock ggpowr.shp> --buildup local_data/hd/art/gtpowrmk.shp ^
+  --palette local_data/resources/mix_exports/palettes/unittem.pal --scale 3 --out local_data/hd
+```
+
+Frames in construction order, last = finished building, white or transparent
+background (white is flood-filled away from the border, edges un-mixed). One
+placement for all frames, fitted from the last frame like the body. The frames
+are spread over the stock frame count (25 for the Power Plant); the 1x build-up
+SHP is rebuilt from the HD frames, its shadow frames kept.
+
 ## Checking it
 
 `tests/autoplay/hd_power_plant.ini` builds two Power Plants at `HdScale=3`
