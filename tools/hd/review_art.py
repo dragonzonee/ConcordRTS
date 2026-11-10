@@ -198,7 +198,8 @@ def asset_folders(root):
 
 
 def numbered(files, prefix, digits):
-    pat = re.compile(r"^%s_(\d{%d})\.(png|webp|jpg|jpeg)$" % (prefix, digits), re.I)
+    # at least `digits` digits: frame_99 is followed by frame_100 in long sequences
+    pat = re.compile(r"^%s_(\d{%d,})\.(png|webp|jpg|jpeg)$" % (prefix, digits), re.I)
     nums = sorted(int(m.group(1)) for f in files for m in [pat.match(f)] if m)
     return nums
 
