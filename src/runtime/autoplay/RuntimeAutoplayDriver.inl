@@ -16,6 +16,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 namespace {
@@ -30,7 +31,10 @@ struct RuntimeAutoplayRun {
     int stepStartTick = -1;
     int targetId = -1;          // object chosen by the last AttackTarget
     int maxTicks = 54000;       // safety stop: 30 minutes of game time
+    int maxSeconds = 900;       // safety stop in real time (ticks freeze at match end)
+    bool matchOverLogged = false;
     int passedSteps = 0;
+    std::map<std::size_t, int> loops;   // RepeatUntil step index -> jumps taken
     bool done = false;
     bool failed = false;
     std::string failure;
@@ -118,6 +122,20 @@ bool autoplayIsEnemy(const RuntimeWindowState& state, const WorldObjectInstance&
 
 bool autoplayIsMobile(const WorldObjectInstance& object) {
     return object.kind == WorldObjectKind::Unit || object.kind == WorldObjectKind::Infantry;
+}
+
+// Harvesters and MCVs: mobile, but not fighting units.
+bool autoplayIsSupportUnit(const WorldObjectInstance& object) {
+    const std::string t = autoplayLower(object.type);
+    if (t.size() >= 3 && t.compare(t.size() - 3, 3, "mcv") == 0) return true;
+    return t == "cmin" || t == "harv" || t == "smin" || t == "pcv";
+}
+
+int autoplayEnemiesLeft(const RuntimeWindowState& state) {
+    int count = 0;
+    for (const auto& o : state.world.getObjects())
+        if (o.alive && !o.rubble && autoplayIsEnemy(state, o)) ++count;
+    return count;
 }
 
 const RuntimeBuildCatalogItem* autoplayCatalogItem(const RuntimeWindowState& state, const std::string& typeId, int* index = nullptr) {
@@ -210,8 +228,9 @@ bool autoplayCondition(RuntimeAutoplayRun& run, const RuntimeWindowState& state,
     }
     if (what == "buildready") {
         const RuntimeBuildCatalogItem* item = autoplayCatalogItem(state, arg(1));
-        detail = item ? arg(1) + " in catalog" : arg(1) + " not in catalog";
-        return item && runtimeReadyProductionForItem(state, *item) != nullptr;
+        const bool ready = item && runtimeReadyProductionForItem(state, *item) != nullptr;
+        detail = !item ? arg(1) + " not in catalog" : (ready ? arg(1) + " finished" : arg(1) + " not finished");
+        return ready;
     }
     if (what == "placing") {
         detail = runtimeSelectedPlacement(state).has_value() ? "placement active" : "no placement";
@@ -249,6 +268,21 @@ bool autoplayCondition(RuntimeAutoplayRun& run, const RuntimeWindowState& state,
         autoplayInt(arg(1), n);
         detail = target ? "target health=" + std::to_string(target->health) : "target gone";
         return !target || target->health < n;
+    }
+    if (what == "enemiesleft") {
+        autoplayInt(arg(1), n);
+        const int left = autoplayEnemiesLeft(state);
+        detail = "enemies left=" + std::to_string(left) + " want<=" + std::to_string(n);
+        // A won match counts as cleared: defeated players' leftovers don't fight.
+        return left <= n || (state.skirmishMatchFinished && state.skirmishVictory);
+    }
+    if (what == "matchover") {
+        const std::string want = autoplayLower(arg(1));
+        detail = state.skirmishMatchFinished ? "match over: " + state.skirmishResult : "match running";
+        if (!state.skirmishMatchFinished) return false;
+        if (want == "victory") return state.skirmishVictory;
+        if (want == "defeat") return !state.skirmishVictory;
+        return true;
     }
     detail = "unknown condition " + words[0];
     return false;
@@ -345,6 +379,7 @@ bool startRuntimeAutoplay(RuntimeWindowState& state) {
     std::filesystem::create_directories(run->outDir, ec);
     run->log.open(run->outDir / "autoplay.log");
     run->maxTicks = runtimeAutoplayGameInt(run->script, "maxticks", run->maxTicks);
+    run->maxSeconds = runtimeAutoplayGameInt(run->script, "maxseconds", run->maxSeconds);
     run->started = std::chrono::steady_clock::now();
     autoplayLog(*run, state, "START " + run->script.path + " steps=" + std::to_string(run->script.steps.size())
         + " owner=" + state.economy.owner);
@@ -361,6 +396,14 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
     if (state.tick > run.maxTicks) {
         failRuntimeAutoplay(run, state, "MaxTicks reached");
         return false;
+    }
+    if (std::chrono::steady_clock::now() - run.started > std::chrono::seconds(run.maxSeconds)) {
+        failRuntimeAutoplay(run, state, "MaxSeconds reached (real time)");
+        return false;
+    }
+    if (state.skirmishMatchFinished && !run.matchOverLogged) {
+        run.matchOverLogged = true;
+        autoplayLog(run, state, "MATCH OVER: " + state.skirmishResult);
     }
     if (run.waitFrames > 0) { --run.waitFrames; return true; }
     if (run.step >= run.script.steps.size()) {
@@ -406,6 +449,7 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
     if (verb == "waitticks") {
         autoplayInt(a.empty() ? "0" : a[0], n);
         if (state.tick - run.stepStartTick >= n) nextRuntimeAutoplayStep(run, state, "");
+        else if (state.skirmishMatchFinished) nextRuntimeAutoplayStep(run, state, "match over, ticks stopped");
         return true;
     }
     if (verb == "waitframes") {
@@ -423,7 +467,43 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         } else if (verb == "expect" || state.tick - run.stepStartTick > timeout) {
             failRuntimeAutoplay(run, state, (verb == "expect" ? "expectation false: " : "timeout: ") + detail);
             return false;
+        } else if (state.skirmishMatchFinished) {
+            // Ticks have stopped, so the wait can't finish. A won match ends the
+            // fight being waited on; a lost one is a failure.
+            if (state.skirmishVictory) {
+                nextRuntimeAutoplayStep(run, state, "match won while waiting (" + detail + ")");
+                return true;
+            }
+            failRuntimeAutoplay(run, state, "match ended (" + state.skirmishResult + ") while waiting: " + detail);
+            return false;
         }
+        return true;
+    }
+    if (verb == "repeatuntil") {
+        // RepeatUntil STEP MAXLOOPS CONDITION...: done when CONDITION holds,
+        // otherwise jump back to step number STEP (at most MAXLOOPS times).
+        int target = 0, maxLoops = 0;
+        if (a.size() < 3 || !autoplayInt(a[0], target) || !autoplayInt(a[1], maxLoops)) {
+            failRuntimeAutoplay(run, state, "RepeatUntil STEP MAXLOOPS CONDITION...");
+            return false;
+        }
+        const std::vector<std::string> words(a.begin() + 2, a.end());
+        if (autoplayCondition(run, state, words, detail)) {
+            nextRuntimeAutoplayStep(run, state, detail + " after " + std::to_string(run.loops[run.step]) + " loop(s)");
+            return true;
+        }
+        std::size_t jump = run.script.steps.size();
+        for (std::size_t i = 0; i < run.step; ++i)
+            if (run.script.steps[i].number == target) { jump = i; break; }
+        if (jump >= run.step) { failRuntimeAutoplay(run, state, "loop target step " + a[0] + " is not an earlier step"); return false; }
+        int& taken = run.loops[run.step];
+        if (taken >= maxLoops) { failRuntimeAutoplay(run, state, "still false after " + std::to_string(taken) + " loops: " + detail); return false; }
+        ++taken;
+        autoplayLog(run, state, "LOOP " + std::to_string(step.number) + " -> step " + a[0] + " (" + std::to_string(taken) + "/" + a[1] + "): " + detail);
+        run.passedSteps -= static_cast<int>(run.step - jump);   // those steps run again
+        run.step = jump;
+        run.phase = 0;
+        run.stepStartTick = -1;
         return true;
     }
     if (verb == "clicktab") {
@@ -492,12 +572,14 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         return true;
     }
     if (verb == "selectunits") {
-        // SelectUnits [TYPE]: drag a box around my mobile units (of TYPE).
+        // SelectUnits [All|Combat|TYPE]: drag a box around my mobile units
+        // (Combat = without harvesters and MCVs).
         const std::string type = a.empty() ? "" : autoplayLower(a[0]);
         std::vector<const WorldObjectInstance*> units;
         for (const auto& object : state.world.getObjects())
             if (object.alive && autoplayIsMine(state, object) && autoplayIsMobile(object)
-                && (type.empty() || type == "all" || autoplayLower(object.type) == type))
+                && (type.empty() || type == "all" || (type == "combat" && !autoplayIsSupportUnit(object))
+                    || autoplayLower(object.type) == type))
                 units.push_back(&object);
         if (units.empty()) { failRuntimeAutoplay(run, state, "no units of mine to select"); return false; }
         if (run.phase == 0) {
@@ -625,7 +707,15 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
                 const double d = (o.x - cx) * (o.x - cx) + (o.y - cy) * (o.y - cy);
                 if (d < bestD) { bestD = d; best = &o; }
             }
-            if (!best) { failRuntimeAutoplay(run, state, "no enemy target found"); return false; }
+            if (!best) {
+                if (run.targetId >= 0 && autoplayEnemiesLeft(state) == 0) {
+                    // Everything died since the last attack (e.g. inside a loop).
+                    nextRuntimeAutoplayStep(run, state, "no enemy left to attack");
+                    return true;
+                }
+                failRuntimeAutoplay(run, state, "no enemy target found");
+                return false;
+            }
             run.targetId = best->instanceId;
             autoplayLog(run, state, "     target " + best->type + " #" + std::to_string(best->instanceId)
                 + " owner=" + best->owner + " at " + std::to_string(best->x) + "," + std::to_string(best->y));
@@ -634,7 +724,12 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
             return true;
         }
         const WorldObjectInstance* target = autoplayObjectById(state, run.targetId);
-        if (!target || !target->alive) { failRuntimeAutoplay(run, state, "target vanished before the click"); return false; }
+        if (!target || !target->alive || target->rubble) {
+            // Killed by auto-fire before the click: pick the next nearest enemy.
+            autoplayLog(run, state, "     target died before the click; picking another");
+            run.phase = 0;
+            return true;
+        }
         const POINT p = runtimeOverlayCenterForObject(state, *target, viewport);
         if (run.phase == 1) { autoplayMove(window, p); run.waitFrames = 1; run.phase = 2; return true; }
         autoplayLeftClick(window, p);
