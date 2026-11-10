@@ -112,3 +112,6 @@ Thumbs.db
 *.community.state
 /.aws/
 /.ssh/
+
+# Autoplay test scripts are source, not local config
+!tests/autoplay/*.ini
