@@ -809,6 +809,33 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         nextRuntimeAutoplayStep(run, state, out.str());
         return true;
     }
+    if (verb == "hover") {
+        // Hover X Y: move the mouse (no click) to window coordinates.
+        int x = 0, y = 0;
+        if (a.size() < 2 || !autoplayInt(a[0], x) || !autoplayInt(a[1], y)) { failRuntimeAutoplay(run, state, "Hover X Y"); return false; }
+        autoplayMove(window, {x, y});
+        nextRuntimeAutoplayStep(run, state, "");
+        run.waitFrames = 2;
+        return true;
+    }
+    if (verb == "sethealth") {
+        // SetHealth TYPE PERCENT: test-only, sets every object of mine of TYPE
+        // to PERCENT of its strength (to look at damage states).
+        int percent = 100;
+        if (a.size() < 2 || !autoplayInt(a[1], percent)) { failRuntimeAutoplay(run, state, "SetHealth TYPE PERCENT"); return false; }
+        const std::string type = autoplayLower(a[0]);
+        int changed = 0;
+        for (auto& o : state.world.accessObjects()) {
+            if (!o.alive || !autoplayIsMine(state, o) || autoplayLower(o.type) != type) continue;
+            o.health = std::max(1, runtimeMaxHealthForObject(state, o) * std::clamp(percent, 1, 100) / 100);
+            ++changed;
+        }
+        if (!changed) { failRuntimeAutoplay(run, state, "no object of mine of type " + type); return false; }
+        state.repaintRequested = true;
+        nextRuntimeAutoplayStep(run, state, std::to_string(changed) + " set to " + std::to_string(percent) + "%");
+        run.waitFrames = 3;
+        return true;
+    }
     if (verb == "cameraon") {
         // CameraOn TYPE [N]: centre the view on my N-th (1-based) object of TYPE.
         int want = 1;

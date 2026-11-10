@@ -34,8 +34,15 @@ python tools/hd/make_hd_building.py --source source.png ^
 
 `--stock-body` is the original SHP the 1x conversion was fitted to (export it
 from `ra2/generic.mix`), so the HD art lines up with the 1x frames exactly.
-Damage states copy the 1x damage (scorch ratio and holes); the glow loop takes
-the HD art's glowing pixels with the same pulse as the 1x loop.
+With `--hd-damage` the damaged/heavy states are drawn at HD (scorch, soot,
+dimmed glows, cavities) and the 1x damaged frames are rebuilt from them;
+without it they copy the 1x damage. The glow loop takes the HD art's glowing
+pixels with the same pulse as the 1x loop.
+
+The damaged active animation (`GAPOWR_AD`) loads `gapowr_a.shp`, not the
+theater name: copy `art/ggpowr_a.shp` to `art/gapowr_a.shp` and
+`ggpowr_a.hdspr` to `gapowr_a.hdspr`, or the stock arcs draw over the damaged
+plant. Damaged buildings also show the shared stock fires `fire01..03.shp`.
 
 ## Checking it
 
