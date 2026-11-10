@@ -1,4 +1,5 @@
 #include "runtime/host/RuntimeShell.h"
+#include "runtime/autoplay/RuntimeAutoplayScript.h"
 #include "data/campaign/CampaignDatabase.h"
 #include "ui/main_menu/RuntimeMainMenu.h"
 #include "ui/campaign/RuntimeCampaignMenu.h"
@@ -93,6 +94,8 @@ struct RuntimeCommandLine {
     std::string campaignCoverageMapPath;
     bool skipMainMenu = false;
     bool skipSkirmishMenu = false;
+    std::string autoplayScriptPath;
+    std::string autoplayOutputDir;
     std::string mainMenuUiSmokeOutput;
     std::string skirmishUiSmokeOutput;
     std::string campaignUiSmokeOutput;
@@ -353,6 +356,22 @@ RuntimeCommandLine parseRuntimeCommandLine(int argc, char** argv) {
 
         if (argument == "--skip-skirmish-menu") {
             commandLine.skipSkirmishMenu = true;
+            continue;
+        }
+
+        if (argument == "--autoplay") {
+            if (!readRequiredValue(argc, argv, index, "--autoplay",
+                    commandLine.autoplayScriptPath, commandLine.errorMessage)) {
+                return commandLine;
+            }
+            continue;
+        }
+
+        if (argument == "--autoplay-out") {
+            if (!readRequiredValue(argc, argv, index, "--autoplay-out",
+                    commandLine.autoplayOutputDir, commandLine.errorMessage)) {
+                return commandLine;
+            }
             continue;
         }
 
@@ -694,6 +713,8 @@ void printRuntimeHelp(const std::string& programName) {
     std::cout << "                         Render and validate the original 800x600 Yuri's Revenge shell.\n";
     std::cout << "  --skip-main-menu       Open the skirmish setup directly (developer/testing shortcut).\n";
     std::cout << "  --skip-skirmish-menu   Launch the configured map directly (developer/testing shortcut).\n";
+    std::cout << "  --autoplay <script>    Play a scripted match through real mouse/keyboard input (tests/autoplay).\n";
+    std::cout << "  --autoplay-out <dir>   Folder for autoplay.log, result.txt and screenshots (default build/autoplay).\n";
     std::cout << "  --vxl-atlas-dump <ids> Dump offline VXL atlases for comma-separated object ids.\n";
     std::cout << "  --config <path>        Runtime config INI; default local_data/runtime_config.ini.\n";
     std::cout << "  --resource-root <dir>  RA2/YR resource directory; default RedAlert2.\n";
@@ -794,6 +815,18 @@ int runRuntimeApplication(int argc, char** argv) {
     if (commandLine.skipSkirmishMenu) {
         config.showMainMenu = false;
         config.showSkirmishMenu = false;
+    }
+    if (!commandLine.autoplayScriptPath.empty()) {
+        // Autoplay starts the scripted match directly (no menus).
+        RuntimeAutoplayScript script;
+        std::string autoplayError;
+        if (!loadRuntimeAutoplayScript(commandLine.autoplayScriptPath, script, autoplayError)) {
+            std::cerr << "Autoplay: " << autoplayError << "\n";
+            return 1;
+        }
+        applyRuntimeAutoplayGameSettings(script, config);
+        config.autoplayScriptPath = commandLine.autoplayScriptPath;
+        config.autoplayOutputDir = commandLine.autoplayOutputDir;
     }
 
     if (!commandLine.mainMenuUiSmokeOutput.empty()) {

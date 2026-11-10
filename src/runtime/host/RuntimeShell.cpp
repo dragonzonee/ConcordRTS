@@ -87716,6 +87716,7 @@ int runRuntimeMultiplayerRuntimeBindingSmokeTest() {
 #include "ui/input/diagnostics/RuntimePlayerMiningBenchmark.inl"
 #include "simulation/movement/ground/diagnostics/RuntimeKeepAuthoredMovementBenchmark.inl"
 #include "runtime/performance/diagnostics/RuntimeLiveMovementBenchmark.inl"
+#include "runtime/autoplay/RuntimeAutoplayDriver.inl"
 
 int runRuntimeWindowSession(
     RuntimeConfig& config,
@@ -88555,12 +88556,21 @@ int runRuntimeWindowSession(
     RuntimeHostLoopPort& hostLoop = loopTraceEnabled
         ? static_cast<RuntimeHostLoopPort&>(loopDiagnostics)
         : static_cast<RuntimeHostLoopPort&>(windowHost);
+    if (!startRuntimeAutoplay(state)) {
+        return 1;
+    }
     while (running) {
         const auto loopWorkStarted = clock::now();
         bool presentationClockDiscontinuity = false;
         clock::duration actualPaintService{};
         bool actualPaintCompleted = false;
         running = hostLoop.drainMessages();
+        if (running && !tickRuntimeAutoplay(state, window)) {
+            // Autoplay finished: result.txt is written; exit with its code.
+            const int autoplayCode = runtimeAutoplayExitCode();
+            std::cout.flush();
+            ExitProcess(static_cast<UINT>(autoplayCode < 0 ? 0 : autoplayCode));
+        }
         if (!running) {
             break;
         }

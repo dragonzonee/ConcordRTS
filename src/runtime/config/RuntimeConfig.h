@@ -125,6 +125,10 @@ struct RuntimeConfig {
     std::vector<PlayerSlot> playerSlots;
     std::string runtimeReplayEventOutputPath =
         "build/runtime_replay_events_command.txt";
+    // Autoplay test harness (--autoplay): a script of player actions driven
+    // through the real window input path, and the folder for its log/images.
+    std::string autoplayScriptPath;
+    std::string autoplayOutputDir;
 };
 
 struct RuntimeConfigOverrides {

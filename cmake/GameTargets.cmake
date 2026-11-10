@@ -54,6 +54,7 @@ add_executable(concord_runtime
     # W027 pure production sources are explicit profile libraries below.
     src/assets/codecs/PalDecoder.cpp
     src/runtime/host/RuntimeMain.cpp
+    src/runtime/autoplay/RuntimeAutoplayScript.cpp
     src/data/campaign/CampaignDatabase.cpp
     src/data/campaign/CampaignPresentationDecoder.cpp
     src/data/campaign/CampaignProgress.cpp
