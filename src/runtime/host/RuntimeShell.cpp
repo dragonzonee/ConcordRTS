@@ -17922,6 +17922,59 @@ bool drawRuntimeIndexedImage(
         return true;
     }
 
+    // GPU map path: the destination can't be read back, so a translucent image
+    // becomes one constant-alpha blend command (transparent pixels masked out).
+    if (sourceAlpha < runtimeIndexedOpaqueAlpha) {
+        auto* native = concord::ui::win32::MapNativeOverlayWin32::current();
+        auto* list = native && native->dc() == dc ? native->drawList() : nullptr;
+        if (list) {
+            const std::size_t area = static_cast<std::size_t>(drawWidth) * static_cast<std::size_t>(drawHeight);
+            std::vector<std::uint32_t> bgra(area, 0);
+            std::vector<unsigned char> mask(area, 0);
+            for (int y = 0; y < drawHeight; ++y) {
+                const int sourceY = std::clamp((y * image.height) / drawHeight, 0, image.height - 1);
+                for (int x = 0; x < drawWidth; ++x) {
+                    const int sourceX = std::clamp((x * image.width) / drawWidth, 0, image.width - 1);
+                    const std::size_t pixelIndex = static_cast<std::size_t>(sourceY) * static_cast<std::size_t>(image.width)
+                        + static_cast<std::size_t>(sourceX);
+                    if (pixelIndex >= image.pixels.size()) continue;
+                    const unsigned char paletteIndex = image.pixels[pixelIndex];
+                    if ((preserveTransparency && paletteIndex == 0)
+                        || (preserveTransparency && useMagentaChroma && isMagentaChroma(paletteIndex))
+                        || static_cast<std::size_t>(paletteIndex) >= palette.size()) continue;
+                    RuntimePaletteColor color{0, 0, 0};
+                    if (paletteIndex != 0 || paletteZeroIsColor) color = displayColor(palette[paletteIndex]);
+                    const std::size_t at = static_cast<std::size_t>(y) * static_cast<std::size_t>(drawWidth) + static_cast<std::size_t>(x);
+                    bgra[at] = static_cast<std::uint32_t>(color.b) | (static_cast<std::uint32_t>(color.g) << 8)
+                        | (static_cast<std::uint32_t>(color.r) << 16);
+                    mask[at] = 1;
+                }
+            }
+            concord::render::MapDrawCommand c;
+            c.left = std::max(0, startX);
+            c.top = std::max(0, startY);
+            c.right = std::min(native->width(), startX + drawWidth);
+            c.bottom = std::min(native->height(), startY + drawHeight);
+            if (c.left >= c.right || c.top >= c.bottom) return true;
+            try {
+                c.kind = concord::render::MapDrawKind::Blend;
+                c.originX = startX;
+                c.originY = startY;
+                c.width = static_cast<std::uint32_t>(drawWidth);
+                c.height = static_cast<std::uint32_t>(drawHeight);
+                c.stride = c.width * 4;
+                c.flags = 1;
+                c.parameter = static_cast<std::uint32_t>(std::min(255, sourceAlpha * 255 / runtimeIndexedOpaqueAlpha));
+                c.offset = list->internValues<std::uint32_t>(bgra);
+                c.auxiliary = list->intern(mask);
+                (void)native->emit(c);
+            } catch (...) {
+                native->reject("indexed-translucent-budget");
+            }
+            return true;
+        }
+    }
+
     for (int y = 0; y < drawHeight; ++y) {
         const int sourceY = std::clamp(
             (y * image.height) / drawHeight,

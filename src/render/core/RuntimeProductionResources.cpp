@@ -16,6 +16,7 @@
 #include "assets/codecs/ShpCodec.h"
 #include "data/maps/MapDatabase.h"
 #include "render/core/RuntimeRendererEnvironment.h"
+#include "render/hd/RuntimeHdSprites.h"
 
 #include "render/core/detail/RuntimeProductionResources.h"
 
@@ -138,6 +139,7 @@ bool decodeRuntimeShpFrameFromBytes(
     image.height = decoded.height;
     image.pixels = std::move(decoded.pixels);
     image.sourcePath = sourceName;
+    image.frameIndex = frameIndex;
     return true;
 }
 
@@ -840,6 +842,14 @@ bool loadRuntimeResourceBytesFromMixArchives(
     std::vector<unsigned char>& bytes,
     std::string& sourceName,
     std::string& errorMessage) {
+    // Replacement art (<local data>/hd/art/<file>) wins over every archive copy.
+    if (const auto overridePath = concord::render::hd::hdArtOverridePath(fileName); !overridePath.empty()) {
+        if (loadBytes(overridePath, bytes, errorMessage)) {
+            sourceName = overridePath;
+            errorMessage.clear();
+            return true;
+        }
+    }
     ensureRuntimeMixArchivePaths(assetRootPath, cache);
 
     std::vector<std::string> searchPaths = cache.mixArchivePaths;

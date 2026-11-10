@@ -207,8 +207,11 @@ bool MapNativeOverlayWin32::targets(const std::uint32_t* pixels) const noexcept 
 int MapNativeOverlayWin32::width() const noexcept {return impl_?impl_->width:0;}
 int MapNativeOverlayWin32::height() const noexcept {return impl_?impl_->height:0;}
 void MapNativeOverlayWin32::recordVisionEffects(std::size_t count) noexcept {if(impl_&&impl_->ownsThread())impl_->report.visionEffects+=count;}
-COLORREF MapNativeOverlayWin32::readPixel(HDC dc,int x,int y) noexcept {
-    if(currentMapNative&&currentMapNative->dc()==dc){currentMapNative->reject("native-destination-read-unsupported");return CLR_INVALID;}
+COLORREF MapNativeOverlayWin32::readPixel(HDC dc,int x,int y,std::source_location where) noexcept {
+    if(currentMapNative&&currentMapNative->dc()==dc){
+        if(!currentMapNative->impl_->failed)
+            std::fprintf(stderr,"Map native destination read from %s:%u (%s)\n",where.file_name(),static_cast<unsigned>(where.line()),where.function_name());
+        currentMapNative->reject("native-destination-read-unsupported");return CLR_INVALID;}
     return GetPixel(dc,x,y);
 }
 COLORREF MapNativeOverlayWin32::setBrushColor(HDC dc,COLORREF color) noexcept {

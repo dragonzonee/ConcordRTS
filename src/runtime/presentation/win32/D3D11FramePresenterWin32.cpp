@@ -10,7 +10,9 @@
 #include <iostream>
 #include <limits>
 #include "render/preparation/MapTilePreparation.h"
+#include "render/hd/RuntimeHdSprites.h"
 #include <cstdlib>
+#include <string>
 #include <filesystem>
 #include <fstream>
 namespace concord::presentation::win32 {
@@ -162,6 +164,24 @@ struct D3D11FramePresenterWin32::Impl {
         const HRESULT got=chain->GetBuffer(0,IID_PPV_ARGS(&back));
         if(FAILED(got)){fail("back-buffer-create",got);return false;}
         width=w;height=h;return true;
+    }
+    // Writes the current back buffer (HD render scale included) to a 32-bit BMP.
+    void saveBackBuffer(const std::string& path) noexcept {
+        try{
+            D3D11_TEXTURE2D_DESC d{};back->GetDesc(&d);
+            d.Usage=D3D11_USAGE_STAGING;d.BindFlags=0;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;d.MiscFlags=0;
+            ComPtr<ID3D11Texture2D> staging;if(FAILED(device->CreateTexture2D(&d,nullptr,&staging)))return;
+            context->CopyResource(staging.Get(),back.Get());D3D11_MAPPED_SUBRESOURCE mapped{};
+            if(FAILED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)))return;
+            const auto w=static_cast<std::uint32_t>(d.Width),h=static_cast<std::uint32_t>(d.Height);
+            BITMAPFILEHEADER file{};BITMAPINFOHEADER info{};
+            info.biSize=sizeof(info);info.biWidth=static_cast<LONG>(w);info.biHeight=-static_cast<LONG>(h);info.biPlanes=1;info.biBitCount=32;
+            file.bfType=0x4D42;file.bfOffBits=sizeof(file)+sizeof(info);file.bfSize=file.bfOffBits+w*h*4;
+            std::ofstream out(path,std::ios::binary);
+            out.write(reinterpret_cast<const char*>(&file),sizeof(file));out.write(reinterpret_cast<const char*>(&info),sizeof(info));
+            for(std::uint32_t y=0;y<h;++y)out.write(static_cast<const char*>(mapped.pData)+static_cast<std::size_t>(y)*mapped.RowPitch,static_cast<std::streamsize>(w)*4);
+            context->Unmap(staging.Get(),0);
+        }catch(...){}
     }
     bool capture() noexcept {
         if(!probe||!probe->captureUpload)return true;

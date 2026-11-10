@@ -61,7 +61,8 @@ struct MapRasterD3D11 {
         hr=uploadRasterBufferD3D11(d,c,indices.data(),indices.size()*4,4,tiles,tileView,tileBytes,uploaded,MapDrawList::maxBytes);
         if(FAILED(hr))return hr;
         const auto count=static_cast<std::uint32_t>(list.commands().size());
-        std::array<std::int32_t,12> frame={f.width,f.height,columns,static_cast<std::int32_t>(count),0,0,0,0,0,0,static_cast<std::int32_t>(count),0};
+        const int hdScale=concord::render::hd::hdRenderScale();
+        std::array<std::int32_t,12> frame={f.width,f.height,columns,static_cast<std::int32_t>(count),0,0,0,0,0,0,static_cast<std::int32_t>(count),hdScale};
         for(std::uint32_t i=0;i<count;++i)if(list.commands()[i].kind==concord::render::MapDrawKind::Shift) {
             const auto& shift=list.commands()[i];frame[3]=static_cast<std::int32_t>(i);
             frame[4]=std::clamp(shift.left,0,f.width);frame[5]=std::clamp(shift.top,0,f.height);
@@ -73,7 +74,7 @@ struct MapRasterD3D11 {
         ComPtr<ID3D11RenderTargetView> target;hr=d->CreateRenderTargetView(back,nullptr,&target);if(FAILED(hr))return hr;
         c->OMSetRenderTargets(1,target.GetAddressOf(),nullptr);
         c->OMSetBlendState(nullptr,nullptr,0xffffffffU);c->OMSetDepthStencilState(nullptr,0);c->RSSetState(raster.Get());
-        const D3D11_VIEWPORT view{0,0,static_cast<float>(f.width),static_cast<float>(f.height),0,1};c->RSSetViewports(1,&view);
+        const D3D11_VIEWPORT view{0,0,static_cast<float>(f.width*hdScale),static_cast<float>(f.height*hdScale),0,1};c->RSSetViewports(1,&view);
         c->IASetInputLayout(nullptr);c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         c->VSSetShader(vertex.Get(),nullptr,0);c->PSSetShader(pixel.Get(),nullptr,0);
         ID3D11ShaderResourceView* views[]={commandView.Get(),resourceView.Get(),tileView.Get()};

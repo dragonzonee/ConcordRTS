@@ -63,6 +63,7 @@ struct RuntimeShpFrameImage {
     int faceSampleCount = 0;
     int exposedFaceCount = 0;
     std::string sourcePath;
+    int frameIndex = -1;   // SHP frame number (HD sprite lookup); -1 = not an SHP frame
     mutable bool packedColorTablesValid = false;
     mutable const RuntimePaletteColor* packedColorPaletteSource = nullptr;
     mutable std::uint32_t packedColorRemap = 0x00ffffffU;

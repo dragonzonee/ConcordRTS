@@ -10,6 +10,7 @@
 // startRuntimeAutoplay()/tickRuntimeAutoplay() from that function's loop.
 
 #include "runtime/autoplay/RuntimeAutoplayScript.h"
+#include "render/hd/RuntimeHdSprites.h"
 
 #include <chrono>
 #include <climits>
@@ -275,6 +276,14 @@ bool autoplayCondition(RuntimeAutoplayRun& run, const RuntimeWindowState& state,
         detail = "enemies left=" + std::to_string(left) + " want<=" + std::to_string(n);
         // A won match counts as cleared: defeated players' leftovers don't fight.
         return left <= n || (state.skirmishMatchFinished && state.skirmishVictory);
+    }
+    if (what == "hdcapture") {
+        // HdCapture NAME: the full-size HD back buffer NAME was written.
+        std::error_code error;
+        const auto path = run.outDir / arg(1);
+        const auto size = std::filesystem::is_regular_file(path, error) ? std::filesystem::file_size(path, error) : 0;
+        detail = arg(1) + (size ? " written (" + std::to_string(size) + " bytes)" : " missing");
+        return size > 0;
     }
     if (what == "matchover") {
         const std::string want = autoplayLower(arg(1));
@@ -545,8 +554,21 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         }
         std::optional<RuntimeCellPoint> cell;
         int x = 0, y = 0;
-        if (a.size() >= 3 && autoplayInt(a[1], x) && autoplayInt(a[2], y)) cell = RuntimeCellPoint{x, y};
-        else cell = findRuntimePlacementCellNearBase(state, *item);
+        if (a.size() >= 3 && autoplayInt(a[1], x) && autoplayInt(a[2], y)) {
+            // The nearest legal cell to X,Y (by the game's own placement rules).
+            const auto occupied = buildRuntimeOccupancyLookup(state);
+            const auto rubble = runtimeBuildingRubblePlacementCells(state);
+            for (int radius = 0; radius <= 10 && !cell; ++radius)
+                for (int dy = -radius; dy <= radius && !cell; ++dy)
+                    for (int dx = -radius; dx <= radius && !cell; ++dx) {
+                        if (std::max(std::abs(dx), std::abs(dy)) != radius) continue;
+                        const RuntimeCellPoint candidate{x + dx, y + dy};
+                        if (runtimeCellCanPlaceSidebarBuilding(state, *item, candidate, &occupied, {}, &rubble)) cell = candidate;
+                    }
+            if (cell && run.phase == 1 && (cell->x != x || cell->y != y))
+                autoplayLog(run, state, "     " + std::to_string(x) + "," + std::to_string(y) + " not legal; using "
+                    + std::to_string(cell->x) + "," + std::to_string(cell->y));
+        } else cell = findRuntimePlacementCellNearBase(state, *item);
         if (!cell) { failRuntimeAutoplay(run, state, "no legal placement cell near base"); return false; }
         if (run.phase == 1) { lookAt(*cell); run.phase = 2; return true; }
         // Find a screen point whose placement preview lands exactly on `cell`.
@@ -737,6 +759,24 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         run.waitFrames = 2;
         return true;
     }
+    if (verb == "cameraon") {
+        // CameraOn TYPE [N]: centre the view on my N-th (1-based) object of TYPE.
+        int want = 1;
+        if (a.size() >= 2) autoplayInt(a[1], want);
+        const std::string type = autoplayLower(a.empty() ? "" : a[0]);
+        int seen = 0;
+        for (const auto& o : state.world.getObjects()) {
+            if (!o.alive || !autoplayIsMine(state, o) || autoplayLower(o.type) != type) continue;
+            if (++seen < want) continue;
+            lookAt({o.x, o.y});
+            nextRuntimeAutoplayStep(run, state, "centred on " + o.type + " #" + std::to_string(o.instanceId)
+                + " at " + std::to_string(o.x) + "," + std::to_string(o.y));
+            run.waitFrames = 3;
+            return true;
+        }
+        failRuntimeAutoplay(run, state, "no object of mine of type " + type + " (#" + std::to_string(want) + ")");
+        return false;
+    }
     if (verb == "camera") {
         int x = 0, y = 0;
         if (a.size() >= 2 && autoplayInt(a[0], x) && autoplayInt(a[1], y)) lookAt({x, y});
@@ -766,10 +806,18 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         return true;
     }
     if (verb == "screenshot") {
-        if (run.phase == 0) { state.repaintRequested = true; run.waitFrames = 2; run.phase = 1; return true; }
-        const std::string name = (a.empty() ? "shot" + std::to_string(step.number) : a[0]) + ".bmp";
+        const std::string base = a.empty() ? "shot" + std::to_string(step.number) : a[0];
+        if (run.phase == 0) {
+            // At an HD render scale the window shows a downscaled copy; also save
+            // the full-size back buffer of the next map frame as NAME_hd.bmp.
+            if (concord::render::hd::hdRenderScale() > 1)
+                concord::render::hd::requestHdCapture((run.outDir / (base + "_hd.bmp")).string());
+            state.repaintRequested = true; run.waitFrames = 2; run.phase = 1; return true;
+        }
+        const std::string name = base + ".bmp";
         const bool ok = autoplayScreenshot(window, run.outDir / name);
-        nextRuntimeAutoplayStep(run, state, ok ? "saved " + name : "screenshot FAILED " + name);
+        nextRuntimeAutoplayStep(run, state, (ok ? "saved " + name : "screenshot FAILED " + name)
+            + (concord::render::hd::hdRenderScale() > 1 ? " (+ " + base + "_hd.bmp)" : ""));
         return true;
     }
     if (verb == "log") {

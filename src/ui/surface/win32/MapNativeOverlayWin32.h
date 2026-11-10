@@ -4,6 +4,7 @@
 #include "ui/skirmish/win32/RuntimeSkirmishBackBufferWin32.h"
 #include <array>
 #include <memory>
+#include <source_location>
 namespace concord::ui::win32 {
 struct MapNativeOverlayReport {
     std::uint64_t emfBytes=0,scratchBytes=0,lookupBytes=0,nativePixels=0;
@@ -42,7 +43,7 @@ public:
     HDC dc() const noexcept;
     const MapNativeOverlayReport& report() const noexcept;
     static MapNativeOverlayWin32* current() noexcept;
-    static COLORREF readPixel(HDC,int,int) noexcept;
+    static COLORREF readPixel(HDC,int,int,std::source_location where=std::source_location::current()) noexcept;
     static COLORREF setBrushColor(HDC,COLORREF) noexcept;
     static COLORREF setPenColor(HDC,COLORREF) noexcept;
 private:

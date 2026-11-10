@@ -164,6 +164,10 @@ RuntimeConfig loadRuntimeConfig(const RuntimeConfigOverrides& overrides) {
                 ini.getValue("Runtime", "TargetFps", ""),
                 config.targetFps
             );
+            config.hdScale = parsePositiveInt(
+                ini.getValue("Runtime", "HdScale", ""),
+                config.hdScale
+            );
             config.showMainMenu = parseRuntimeBool(
                 ini.getValue(
                     "Runtime",

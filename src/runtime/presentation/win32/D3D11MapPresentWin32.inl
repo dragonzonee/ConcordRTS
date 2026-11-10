@@ -16,7 +16,9 @@ bool D3D11FramePresenterWin32::presentMap(const concord::render::MapDrawFrame& f
         if(l<r&&t<b)entries+=static_cast<std::uint64_t>((r-1)/32-l/32+1)*static_cast<std::uint64_t>((b-1)/32-t/32+1);
     }
     if(entries>concord::render::MapDrawList::maxBytes/4){++p.report.budgetRejected;p.fail("map-tile-budget",E_OUTOFMEMORY);return false;}
-    if(!p.beginFrame(f.width,f.height,2,f.list.commands().size()*64,f.list.resources().size()*4,entries,buckets,48))return false;
+    // HD render scale: an S-times back buffer; the bitblt swap chain stretches it to the client.
+    const int hdScale=concord::render::hd::hdRenderScale();
+    if(!p.beginFrame(f.width*hdScale,f.height*hdScale,2,f.list.commands().size()*64,f.list.resources().size()*4,entries,buckets,48))return false;
     p.collect();
     if(p.probe&&p.probe->deviceRemoved){p.fail("map-device-removed-injected",DXGI_ERROR_DEVICE_REMOVED);p.report.removedReason=DXGI_ERROR_DEVICE_REMOVED;return false;}
     if(p.probe&&p.probe->failUpload){p.fail("map-upload-injected",E_FAIL);return false;}
@@ -41,6 +43,7 @@ bool D3D11FramePresenterWin32::presentMap(const concord::render::MapDrawFrame& f
     p.report.uploadedBytes+=uploaded;
     p.finishSubmission();
     if(!p.capture())return false;
+    if(const auto hdCapture=concord::render::hd::takeHdCaptureRequest();!hdCapture.empty())p.saveBackBuffer(hdCapture);
     const auto present=Clock::now();hr=p.chain->Present(p.probe&&p.probe->failPresent?5U:1U,0);
     if(sample)sample->presentCpuMs=elapsed(present);
     if(FAILED(hr)){p.fail("map-present",hr);return false;}

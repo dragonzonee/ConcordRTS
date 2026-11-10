@@ -1,5 +1,7 @@
 #include "runtime/host/RuntimeShell.h"
 #include "runtime/autoplay/RuntimeAutoplayScript.h"
+#include "render/hd/RuntimeHdSprites.h"
+#include <filesystem>
 #include "data/campaign/CampaignDatabase.h"
 #include "ui/main_menu/RuntimeMainMenu.h"
 #include "ui/campaign/RuntimeCampaignMenu.h"
@@ -825,8 +827,23 @@ int runRuntimeApplication(int argc, char** argv) {
             return 1;
         }
         applyRuntimeAutoplayGameSettings(script, config);
+        config.hdScale = runtimeAutoplayGameInt(script, "hdscale", config.hdScale);
         config.autoplayScriptPath = commandLine.autoplayScriptPath;
         config.autoplayOutputDir = commandLine.autoplayOutputDir;
+    }
+    // HD sprite packs live in <local data>/hd; the scale applies to map frames.
+    concord::render::hd::configureHdSprites(
+        std::filesystem::path(config.localDataRootPath) / "hd", config.hdScale);
+    if (config.hdScale > 1) {
+        std::cout << "HD render scale " << concord::render::hd::hdRenderScale() << "x, packs from "
+                  << (std::filesystem::path(config.localDataRootPath) / "hd").string() << "\n";
+        // The HD scale lives in the GPU map raster; pick it unless a map
+        // backend was chosen explicitly (software ignores the scale).
+        if (commandLine.presentation.mapBackend == concord::presentation::FrameBackend::Software
+            && commandLine.skirmishWindow != "sdl3") {
+            commandLine.presentation.mapBackend = concord::presentation::FrameBackend::D3D11;
+            commandLine.presentation.mapDevice = commandLine.presentation.device;
+        }
     }
 
     if (!commandLine.mainMenuUiSmokeOutput.empty()) {

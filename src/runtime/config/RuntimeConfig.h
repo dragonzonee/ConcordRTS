@@ -129,6 +129,9 @@ struct RuntimeConfig {
     // through the real window input path, and the folder for its log/images.
     std::string autoplayScriptPath;
     std::string autoplayOutputDir;
+    // HD render scale (1 = off, 2..4): the map is rendered S times larger and
+    // HD sprite packs from <local data>/hd are sampled at full detail.
+    int hdScale = 1;
 };
 
 struct RuntimeConfigOverrides {

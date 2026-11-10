@@ -11,8 +11,8 @@ void MapVisionGpuFixture::finishSprites(const std::vector<std::uint32_t>& input,
         const auto index=static_cast<std::size_t>(selected-list_.commands().begin());concord::render::MapSpriteMaterial source;
         std::memcpy(&source,reinterpret_cast<const unsigned char*>(list_.resources().data())+selected->offset,sizeof(source));
         for(int test=0;test<10;++test){auto bad=list_;auto c=*selected;auto m=source;
-            switch(test){case 0:c.offset=UINT32_MAX;break;case 1:c.auxiliary=UINT32_MAX;break;case 2:m.width=0;break;case 3:m.flags=32;break;
-                case 4:m.reserved=1;break;case 5:m.airstrike=65536;break;case 6:m.indices=UINT32_MAX;break;case 7:m.flags=2;break;
+            switch(test){case 0:c.offset=UINT32_MAX;break;case 1:c.auxiliary=UINT32_MAX;break;case 2:m.width=0;break;case 3:m.flags=64;break;
+                case 4:m.hdPixels=1;break;case 5:m.airstrike=65536;break;case 6:m.indices=UINT32_MAX;break;case 7:m.flags=2;break;
                 case 8:m.flags=4;m.litColors=UINT32_MAX;break;case 9:m.baseColors=UINT32_MAX;break;}
             if(test>1)c.offset=bad.internValues<concord::render::MapSpriteMaterial>({&m,1});bad.replace(index,c);require(!bad.valid(),"malformed sprite header/plane/table rejected before GPU");}}
     require(gpu_->presentMap({list_,++sequence_,width_,height_}),"actual GPU material sprite submit");require(probe_.readbacks==sequence_,"sprite explicit diagnostic readback");const bool exact=equals(expected,label);

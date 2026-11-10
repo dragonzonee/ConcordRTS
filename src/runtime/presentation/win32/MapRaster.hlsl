@@ -6,7 +6,11 @@ struct Command {int4 rect;uint kind,offset,stride,width;uint height,palette,para
 StructuredBuffer<Command> commands : register(t0);
 ByteAddressBuffer resources : register(t1);
 StructuredBuffer<uint> tiles : register(t2);
-cbuffer Frame : register(b0) {uint width,height,columns,shiftIndex;int4 shiftRect;int2 shiftOffset;uint commandCount,padding;};
+cbuffer Frame : register(b0) {uint width,height,columns,shiftIndex;int4 shiftRect;int2 shiftOffset;uint commandCount,hdScale;};
+// HD render scale: every operation runs on game pixels (output / hdScale); HD
+// sprite materials (flag 32) sample their true-colour pixels at gHdSub.
+static uint gHdScale=1U;
+static int2 gHdSub=int2(0,0);
 uint byteAt(uint p) {return (resources.Load(p&~3U)>>((p&3U)*8U))&255U;}
 uint wordAt(uint p) {return byteAt(p)|(byteAt(p+1U)<<8U)|(byteAt(p+2U)<<16U)|(byteAt(p+3U)<<24U);}
 uint4 unpack(uint p) {return uint4(p&255U,(p>>8U)&255U,(p>>16U)&255U,p>>24U);}
@@ -35,6 +39,14 @@ uint4 spriteColor(uint material,uint sourceIndex) {
     if((flags&16U)!=0U){uint light=(source.z*3U+source.y*6U+source.x)/10U;source=uint4(source.x/4U,source.y/4U,min(255U,72U+light*3U/4U),0U);}
     uint add=resources.Load(material+40U),b=add&31U,g=(add>>5U)&63U,r=(add>>11U)&31U;
     source.rgb|=uint3((b<<3U)|(b>>2U),(g<<2U)|(g>>4U),(r<<3U)|(r>>2U));return source;
+}
+// HD texel (B,G,R,A) of a sprite material for game pixel sourceIndex; false = no HD art.
+bool spriteHd(uint material,uint sourceIndex,out uint4 texel) {
+    texel=uint4(0,0,0,0);
+    if(gHdScale<2U||(resources.Load(material+36U)&32U)==0U)return false;
+    uint w=resources.Load(material),x=sourceIndex%w,y=sourceIndex/w,stride=w*gHdScale;
+    uint at=(y*gHdScale+uint(gHdSub.y))*stride+x*gHdScale+uint(gHdSub.x);
+    texel=unpack(resources.Load(resources.Load(material+44U)+at*4U));return true;
 }
 uint4 compose(int2 p,uint first,uint last,uint4 color) {
     uint4 saved[8];uint savedCount=0U;
@@ -69,11 +81,14 @@ uint4 compose(int2 p,uint first,uint last,uint4 color) {
         if(c.kind==14U){uint receiver=c.flags==1U?byteAt(c.offset+local.y*c.stride+local.x):wordAt(c.offset+local.y*c.stride+local.x*4U),table=c.palette+receiver*1024U;
             color.rgb=uint3(resources.Load(table+color.x*4U)&255U,(resources.Load(table+color.y*4U)>>8U)&255U,(resources.Load(table+color.z*4U)>>16U)&255U);continue;}
         if(c.kind==19U){uint sourceIndex=local.y*c.width+local.x;if(byteAt(c.auxiliary+sourceIndex)==0U||byteAt(resources.Load(c.offset+8U)+sourceIndex)==0U)continue;
+            uint4 hd;if(spriteHd(c.offset,sourceIndex,hd)){uint a=hd.w*min(c.parameter,255U)/255U;
+                color=uint4((hd.rgb*a+color.rgb*(255U-a)+127U)/255U,0U);continue;}
             source=spriteColor(c.offset,sourceIndex);if(c.parameter>=255U)color=source;else color=uint4((source.rgb*c.parameter+color.rgb*(255U-c.parameter)+127U)/255U,0U);continue;}
         if(c.kind==18U){uint2 chain=resources.Load2(c.offset+local.y*c.stride+local.x*8U);uint4 groups[8];uint depth=0U;
             [loop]for(uint i=0;i<chain.y;++i){uint4 operation=c.flags==1U?resources.Load4(c.palette+(chain.x+i)*16U):uint4(resources.Load2(c.palette+(chain.x+i)*8U),0U,0U);
                 if(operation.y==256U){groups[depth++]=color;continue;}if(operation.y==257U){color=uint4((color.rgb*128U+groups[--depth].rgb*127U+127U)/255U,0U);continue;}
-                uint4 layer=operation.w==1U?spriteColor(operation.x,operation.z):unpack(operation.x);color=uint4((layer.rgb*operation.y+color.rgb*(255U-operation.y)+127U)/255U,0U);}continue;} 
+                uint4 layer=operation.w==1U?spriteColor(operation.x,operation.z):unpack(operation.x);uint4 hd;
+                if(operation.w==1U&&spriteHd(operation.x,operation.z,hd))layer=uint4((hd.rgb*hd.w+layer.rgb*(255U-hd.w)+127U)/255U,0U);color=uint4((layer.rgb*operation.y+color.rgb*(255U-operation.y)+127U)/255U,0U);}continue;} 
         if(c.kind==7U) {
             uint2 descriptor=resources.Load2(c.offset+local.y*c.stride+local.x*8U);
             if(descriptor.x==0U)continue;
@@ -98,7 +113,10 @@ uint4 compose(int2 p,uint first,uint last,uint4 color) {
     return color;
 }
 float4 ps(float4 position:SV_Position):SV_Target {
-    int2 p=int2(position.xy),source=p;
+    gHdScale=max(hdScale,1U);
+    uint2 output=uint2(position.xy),logical=output/gHdScale;
+    int2 p=int2(logical),source=p;
+    gHdSub=int2(output-logical*gHdScale);
     if(shiftIndex<commandCount&&all(p>=shiftRect.xy)&&all(p<shiftRect.zw))
         source=clamp(p-shiftOffset,shiftRect.xy,shiftRect.zw-1);
     uint4 color=compose(source,0U,shiftIndex,uint4(0,0,0,0));

@@ -45,12 +45,13 @@ MaxTicks=30000        ; safety stop (30 ticks = 1 second of game time)
 | `DeployMCV` | Clicks your MCV to select it, then clicks it again to deploy |
 | `ClickTab Building\|Defense\|Infantry\|Unit` | Clicks a sidebar tab |
 | `ClickSidebar TYPE` | Switches to the item's tab and clicks its build icon (e.g. `GAPOWR`, `E1`) |
-| `PlaceBuilding TYPE [NearBase\|X Y]` | Enters placement for a finished building and clicks a legal map cell |
+| `PlaceBuilding TYPE [NearBase\|X Y]` | Enters placement for a finished building and clicks a legal map cell (the nearest legal one to X Y) |
 | `SelectUnits [All\|Combat\|TYPE]` | Drags a selection box around your units (`Combat` skips harvesters and MCVs) |
 | `MoveTo X Y` / `MoveTo EnemyBase [distance]` | Left-clicks the ground to move the selection |
 | `RightMoveTo X Y` | Same with the right mouse button |
 | `AttackTarget [Any\|Structure\|Unit\|TYPE]` | Clicks the enemy object nearest to the selection; remembered as the target |
 | `Camera X Y` | Centres the view on a cell |
+| `CameraOn TYPE [N]` | Centres the view on your N-th object of TYPE |
 | `Click X Y` / `RightClick X Y` | Raw click at window coordinates |
 | `Key K` | Presses a key (`Esc`, `Enter`, `Space`, a letter) |
 | `WaitTicks N` / `WaitFrames N` | Waits game ticks / loop passes |
@@ -65,7 +66,11 @@ MaxTicks=30000        ; safety stop (30 ticks = 1 second of game time)
 `BaseReady`, `BuildingExists TYPE [N]`, `UnitExists TYPE [N]`, `BuildReady TYPE`,
 `Placing`, `CreditsAtLeast N`, `Selected N`, `UnitsNear X Y [R] [N]`,
 `TargetDestroyed`, `TargetDamaged HEALTH`, `EnemiesLeft N` (at most N enemy objects alive),
-`MatchOver [Victory|Defeat]`.
+`MatchOver [Victory|Defeat]`, `HdCapture NAME` (the HD back-buffer image NAME was written).
+
+`HdScale=2..4` in `[Game]` renders the map at that scale on the GPU (see
+`src/render/hd/RuntimeHdSprites.h`); every `Screenshot NAME` then also saves
+`NAME_hd.bmp`, the full-size frame.
 
 Game ticks stop when the match ends, so once it is over `WaitTicks` finishes at
 once and a pending `WaitUntil` passes on a victory and fails on a defeat.
@@ -79,6 +84,7 @@ once and a pending `WaitUntil` passes on a victory and fails on a defeat.
 | `build_base.ini` | Power Plant, Ore Refinery, Barracks, War Factory |
 | `train_units.ini` | Base, then 3 GIs and 2 Grizzly tanks from the factories |
 | `build_to_win.ini` | Base, 6 Grizzlies, march and attack until no enemy is left |
+| `hd_power_plant.ini` | 3x HD render: two Power Plants drawn from their HD sprite pack |
 
 Run them all: `powershell -File tools\autoplay\Run-Autoplay.ps1` (summary table,
 exit code 1 if any fails). One script: `-Script build_base`.
