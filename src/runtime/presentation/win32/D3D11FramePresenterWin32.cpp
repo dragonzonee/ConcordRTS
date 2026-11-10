@@ -11,6 +11,7 @@
 #include <limits>
 #include "render/preparation/MapTilePreparation.h"
 #include "render/hd/RuntimeHdSprites.h"
+#include "runtime/window/win32/RuntimeWindowScaleMacrosWin32.h"   // logical client size of the battle window
 #include <cstdlib>
 #include <string>
 #include <filesystem>

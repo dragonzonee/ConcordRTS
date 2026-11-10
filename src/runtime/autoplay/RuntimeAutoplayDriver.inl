@@ -66,7 +66,10 @@ void autoplayLog(RuntimeAutoplayRun& run, const RuntimeWindowState& state, const
 
 // ---------------------------------------------------------------- input
 void autoplaySend(HWND window, UINT message, WPARAM wParam, POINT point) {
-    SendMessageW(window, message, wParam, MAKELPARAM(point.x, point.y));
+    // Points are logical; the window host divides real client coordinates by
+    // the battle window scale, so send what a real mouse would report.
+    const int scale = concord::window::runtimeWindowScaleFor(window);
+    SendMessageW(window, message, wParam, MAKELPARAM(point.x * scale + scale / 2, point.y * scale + scale / 2));
 }
 
 void autoplayMove(HWND window, POINT point) {
@@ -300,7 +303,8 @@ bool autoplayCondition(RuntimeAutoplayRun& run, const RuntimeWindowState& state,
 // ---------------------------------------------------------------- screenshots
 bool autoplayScreenshot(HWND window, const std::filesystem::path& path) {
     const RECT client = autoplayClient(window);
-    const int w = client.right - client.left, h = client.bottom - client.top;
+    const int realScale = concord::window::runtimeWindowScaleFor(window);   // capture the real (scaled) client
+    const int w = (client.right - client.left) * realScale, h = (client.bottom - client.top) * realScale;
     if (w <= 0 || h <= 0) return false;
     HDC screen = GetDC(window);
     HDC memory = CreateCompatibleDC(screen);

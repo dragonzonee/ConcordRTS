@@ -839,10 +839,16 @@ int runRuntimeApplication(int argc, char** argv) {
                   << (std::filesystem::path(config.localDataRootPath) / "hd").string() << "\n";
         // The HD scale lives in the GPU map raster; pick it unless a map
         // backend was chosen explicitly (software ignores the scale).
-        if (commandLine.presentation.mapBackend == concord::presentation::FrameBackend::Software
-            && commandLine.skirmishWindow != "sdl3") {
-            commandLine.presentation.mapBackend = concord::presentation::FrameBackend::D3D11;
-            commandLine.presentation.mapDevice = commandLine.presentation.device;
+        // The battle window is S times larger than the game's logical size, so
+        // all of its frames must reach it through the D3D11 presenter (which
+        // scales them); direct GDI drawing would land in the top-left corner.
+        if (commandLine.skirmishWindow != "sdl3") {
+            if (commandLine.presentation.backend == concord::presentation::FrameBackend::Software)
+                commandLine.presentation.backend = concord::presentation::FrameBackend::D3D11;
+            if (commandLine.presentation.mapBackend == concord::presentation::FrameBackend::Software) {
+                commandLine.presentation.mapBackend = concord::presentation::FrameBackend::D3D11;
+                commandLine.presentation.mapDevice = commandLine.presentation.device;
+            }
         }
     }
 

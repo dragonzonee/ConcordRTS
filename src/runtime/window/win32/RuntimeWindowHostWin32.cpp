@@ -1,4 +1,6 @@
 #include "runtime/window/win32/RuntimeWindowHostWin32.h"
+#include "runtime/window/win32/RuntimeWindowScaleWin32.h"
+#include "render/hd/RuntimeHdSprites.h"
 #include <chrono>
 #include <thread>
 
@@ -22,14 +24,25 @@ RuntimeWindowCreateResult RuntimeWindowHostWin32::create(int width, int height) 
     windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     if (RegisterClassW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         return RuntimeWindowCreateResult::RegistrationFailed;
-    RECT windowRect{0, 0, width, height};
-    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+    // HD render scale: the real client is S times the logical game size. When
+    // that fills (or exceeds) the monitor, use a borderless full-screen window.
+    const int scale = concord::render::hd::hdRenderScale();
+    const int realWidth = width * scale, realHeight = height * scale;
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
+    const int monitorWidth = monitor.rcMonitor.right - monitor.rcMonitor.left;
+    const int monitorHeight = monitor.rcMonitor.bottom - monitor.rcMonitor.top;
+    const bool fullScreen = scale > 1 && realWidth >= monitorWidth && realHeight >= monitorHeight;
+    const DWORD style = fullScreen ? WS_POPUP : WS_OVERLAPPEDWINDOW;
+    RECT windowRect{0, 0, realWidth, realHeight};
+    if (!fullScreen) AdjustWindowRect(&windowRect, style, FALSE);
     auto* previous = creatingHost;
     creatingHost = this;
-    window_ = CreateWindowExW(0, className, L"ConcordRTS", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, windowRect.right - windowRect.left,
-        windowRect.bottom - windowRect.top, nullptr, nullptr, instance, nullptr);
+    window_ = CreateWindowExW(0, className, L"ConcordRTS", style,
+        fullScreen ? monitor.rcMonitor.left : CW_USEDEFAULT, fullScreen ? monitor.rcMonitor.top : CW_USEDEFAULT,
+        windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, nullptr, nullptr, instance, nullptr);
     creatingHost = previous;
+    if (window_ != nullptr) concord::window::setRuntimeWindowScale(window_, scale);
     return window_ != nullptr ? RuntimeWindowCreateResult::Created
         : RuntimeWindowCreateResult::CreationFailed;
 }
@@ -56,6 +69,7 @@ LRESULT CALLBACK RuntimeWindowHostWin32::procedure(HWND window, UINT message,
         host = creatingHost;
         if (!SetPropW(window, hostProperty, host)) return FALSE;
     }
+    lParam = concord::window::scaleRuntimeMouseLParam(window, message, lParam);
     const LRESULT result = host != nullptr
         ? host->dispatch_(window, message, wParam, lParam)
         : DefWindowProcW(window, message, wParam, lParam);

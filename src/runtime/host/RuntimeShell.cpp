@@ -29,6 +29,7 @@
 #include "ui/text/win32/RuntimeMatchResultSystemFontWin32.h"
 #include "ui/text/win32/RuntimeCampaignScoreSystemFontWin32.h"
 #include "runtime/window/win32/RuntimeWindowHostWin32.h"
+#include "runtime/window/win32/RuntimeWindowScaleMacrosWin32.h"   // battle window HD scale
 #include "runtime/replay/RuntimeMatchReplay.h"
 #include "render/core/RuntimeMapTerrainFrameRenderer.h"
 #include "runtime/host/RuntimeUiClockWin32.h"
