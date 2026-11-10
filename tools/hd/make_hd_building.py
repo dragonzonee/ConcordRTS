@@ -256,7 +256,8 @@ def glow_frames(hd, anim_frames, first, n, damaged, S):
         f = 0.72 + 0.5 * (0.5 + 0.5 * math.sin(2 * math.pi * i / n))
         if damaged:
             f *= rnd.choice((0.55, 0.8, 1.0))
-        lowres = anim_frames[first + i]["canvas"] > 0 if first + i < len(anim_frames) else None
+        lowres = (anim_frames[first + i]["canvas"] > 0
+                  if anim_frames is not None and first + i < len(anim_frames) else None)
         mask = is_glow(hd[..., :3]) & (hd[..., 3] > 32)
         if lowres is not None:
             near = blur(upsample(lowres.astype(np.float32), S), S) > 0.01
@@ -314,6 +315,8 @@ def main():
     ap.add_argument("--name", help="pack name (default: body SHP name)")
     ap.add_argument("--hd-damage", action="store_true",
                     help="draw damage states at HD and rebuild the 1x damaged frames from them")
+    ap.add_argument("--rebuild-1x", action="store_true",
+                    help="new art: rebuild the 1x body (normal + damage) and glow frames from the HD art")
     args = ap.parse_args()
     S = args.scale
     os.makedirs(args.out, exist_ok=True)
@@ -321,16 +324,21 @@ def main():
     _, _, stock = read_shp(args.stock_body)
     W, H, body = read_shp(args.body)
     hd = fit_source(Image.open(args.source), stock[0]["box"], W, H, S)
+    allowed = [12] + list(range(32, 200)) + [200, 201, 202, 203]
+    visible = len(body) // 2 if len(body) % 2 == 0 else len(body)
+    if args.rebuild_1x:
+        # New art: the 1x normal frame is rebuilt from the HD art (its outline
+        # follows the new design); damage is drawn at HD too.
+        args.hd_damage = True
+        body[0]["canvas"] = to_1x_indices(hd, pal, S, allowed)
     normal = body[0]["canvas"]
     # the 1x silhouette decides coverage; keep HD alpha inside it (with a soft edge)
     cover = blur(upsample((normal > 0).astype(np.float32), S), 1)
     hd[..., 3] = np.minimum(hd[..., 3], np.clip(cover * 1.5, 0, 1) * 255)
-    visible = len(body) // 2 if len(body) % 2 == 0 else len(body)
     if args.hd_damage and visible >= 3:
         # Damage drawn at HD; the 1x damaged frames are rebuilt from it so the
         # game's 1x silhouette (holes included) matches the HD art exactly.
         damaged, heavy = hd_damage(hd, 1, 11, S), hd_damage(hd, 2, 23, S)
-        allowed = [12] + list(range(32, 200)) + [200, 201, 202, 203]
         canvases = [f["canvas"] for f in body]
         canvases[1] = to_1x_indices(damaged, pal, S, allowed)
         canvases[2] = to_1x_indices(heavy, pal, S, allowed)
@@ -351,9 +359,13 @@ def main():
         aW, aH, anim = read_shp(args.anim)
         assert (aW, aH) == (W, H), "anim canvas must match the body canvas"
         n = len(anim) // 2
-        glow = glow_frames(hd, anim, 0, n, False, S) + glow_frames(damaged if damaged is not None else hd, anim, n, n, True, S)
+        restrict = None if args.rebuild_1x else anim     # new art: glow areas come from the HD art alone
+        glow = glow_frames(hd, restrict, 0, n, False, S) + glow_frames(damaged if damaged is not None else hd, restrict, n, n, True, S)
         aname = os.path.splitext(os.path.basename(args.anim))[0].lower()
         write_pack(os.path.join(args.out, aname + ".hdspr"), S, W, H, glow, house=False)
+        if args.rebuild_1x:
+            write_shp(args.anim, W, H, [to_1x_indices(g, pal, S, allowed) for g in glow])
+            print("rewrote 1x glow frames in", args.anim)
 
 
 if __name__ == "__main__":

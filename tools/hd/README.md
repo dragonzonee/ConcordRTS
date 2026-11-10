@@ -44,6 +44,14 @@ theater name: copy `art/ggpowr_a.shp` to `art/gapowr_a.shp` and
 `ggpowr_a.hdspr` to `gapowr_a.hdspr`, or the stock arcs draw over the damaged
 plant. Damaged buildings also show the shared stock fires `fire01..03.shp`.
 
+## Replacing the building art
+
+`--rebuild-1x` (implies `--hd-damage`) treats `--source` as new art: the 1x
+normal frame, damage frames and glow loop (`--anim`) are rebuilt from the HD
+art instead of being kept from the earlier conversion. Used to make the
+finished Power Plant match the last frame of the artist build-up (the source is
+that frame, cut out). Copy the anim and its pack to `gapowr_a` afterwards.
+
 ## Build-up animation from artist frames
 
 ```
