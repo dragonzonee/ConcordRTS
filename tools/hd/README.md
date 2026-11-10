@@ -119,3 +119,12 @@ overlay 5, upload 3, present 2). `Profile N` in an autoplay script measures it;
 
 - Build-up frames stay 1x.
 - 60 FPS needs sprite materials and GPU resources cached across frames.
+
+## Importing a model's art folder
+
+`tools/hd/import_art4k.sh` converts every structure in `F:\Ra2Mod\art_4k\buildings\allied`
+(finished.png, plus buildup_*.png when present) into `local_data/hd` with `--rebuild-1x`, using the
+generic `gg*.shp` bodies and the temperate `gt*mk.shp` build-ups. GAPOWR (your own art) and the walls
+are skipped. `tests/autoplay/hd_art4k_structures.ini` and `hd_art4k_structures2.ini` build and capture
+all of them (French, 2peaks; the map has room for about 15 buildings per base, hence two scripts).
+Moving parts (`_a`, `_b` ... layers, turrets) still draw the stock 1x art on top.
