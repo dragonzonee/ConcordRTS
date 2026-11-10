@@ -95,20 +95,16 @@ std::vector<ButtonSpec> buttons(const RuntimeMainMenuController& state) {
                 MenuAction::OpenHome}
         };
     }
+    // Local-only build: the Internet (online matchmaking) and Network (LAN)
+    // entries are removed; single player (campaign/skirmish) is the only mode.
     return {
         {0, text("GUI:SinglePlayer", L"Single Player"),
             text("STT:MainButtonSinglePlayer", L"Play a single player game."),
             MenuAction::OpenSinglePlayer},
-        {1, text("GUI:Internet", L"Internet"),
-            text("STT:MainButtonWWOnline", L"Play on the Internet."),
-            MenuAction::Internet},
-        {2, text("GUI:Network", L"Network"),
-            text("STT:MainButtonNetwork", L"Play a network game."),
-            MenuAction::Network},
-        {3, text("GUI:MoviesAndCredits", L"Movies & Credits"),
+        {1, text("GUI:MoviesAndCredits", L"Movies & Credits"),
             text("STT:MainButtonMovies", L"View movies and credits."),
             MenuAction::OpenMovies},
-        {4, text("GUI:Options", L"Options"),
+        {2, text("GUI:Options", L"Options"),
             text("STT:MainButtonOptions", L"Customize game settings."),
             MenuAction::OpenOptions},
         {-1, text("GUI:ExitGame", L"Exit Game"),

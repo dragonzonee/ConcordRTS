@@ -2600,30 +2600,20 @@ int runRuntimeMainMenuSmokeTest(
     state.page = MenuPage::Options;
     const std::vector<ButtonSpec> options = buttons(state);
     state.page = MenuPage::Home;
-    const std::wstring internetLabel = state.csf.get("GUI:Internet", L"Internet");
-    const std::wstring networkLabel = state.csf.get("GUI:Network", L"Network");
-    const std::wstring internetTooltip = state.csf.get(
-        "STT:MainButtonWWOnline", L"Play on the Internet."
-    );
-    const std::wstring networkTooltip = state.csf.get(
-        "STT:MainButtonNetwork", L"Play a network game."
-    );
-    const bool networkEntriesExposed = home.size() >= 3
-        && home[1].label == internetLabel
-        && home[1].tooltip == internetTooltip
-        && home[1].action == MenuAction::Internet
-        && home[2].label == networkLabel
-        && home[2].tooltip == networkTooltip
-        && home[2].action == MenuAction::Network;
-    const bool navigationLayout = home.size() == 6
+    // Local-only build: the home page must not offer Internet or Network play.
+    bool localOnlyHome = true;
+    for (const ButtonSpec& button : home) {
+        if (button.action == MenuAction::Internet || button.action == MenuAction::Network) {
+            localOnlyHome = false;
+        }
+    }
+    const bool navigationLayout = home.size() == 4
         && home.front().action == MenuAction::OpenSinglePlayer
         && home[0].slot == 0
         && home[1].slot == 1
+        && home[1].action == MenuAction::OpenMovies
         && home[2].slot == 2
-        && home[3].slot == 3
-        && home[3].action == MenuAction::OpenMovies
-        && home[4].slot == 4
-        && home[4].action == MenuAction::OpenOptions
+        && home[2].action == MenuAction::OpenOptions
         && home.back().action == MenuAction::Exit
         && resolvedSlot(state, home.back()) < 0
         && singlePlayer.size() == 4
@@ -2855,7 +2845,7 @@ int runRuntimeMainMenuSmokeTest(
     state.phase = MenuPhase::Idle;
     state.pageStatus.clear();
 
-    if (!navigationLayout || !networkEntriesExposed
+    if (!navigationLayout || !localOnlyHome
         || !movieLibraryContract || !creditsContract || !themeContract
         || !backHierarchy || !moviesTransition || !movieSelection
         || !creditsTransition || !creditsPaging || !optionsTransition
@@ -2864,7 +2854,7 @@ int runRuntimeMainMenuSmokeTest(
         || !playbackFeedback) {
         std::cerr << "Main menu smoke failed: navigation/content/options contract "
                      "is invalid (layout=" << navigationLayout
-                  << " networkExposed=" << networkEntriesExposed
+                  << " localOnly=" << localOnlyHome
                   << " movies=" << movieLibraryContract
                   << "/" << moviesTransition << "/" << movieSelection
                   << " credits=" << creditsContract
