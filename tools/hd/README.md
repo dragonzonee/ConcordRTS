@@ -66,6 +66,18 @@ building's own pixels are filled in, then the new building is fitted into
 sidebar draws the HD pixels at `HdScale` (masked HD image command, dimmed or
 greyed like 1x when the item is unavailable).
 
+## Animations (fires, explosions)
+
+```
+python tools/hd/make_hd_anim.py --frames "fire_4k/fire01/frames/fire01_*.png" ^
+  --stock fire01.shp --palette anim.pal --scale 3 --out local_data/hd
+```
+
+Frames on a canvas with the stock canvas's shape (any multiple; FIRE01 art is
+48x), transparent background, same frame count. Writes `art/fire01.shp` (anim
+palette, outline at alpha >= 0.25 so soft HD edges stay visible) and
+`fire01.hdspr`. The fires FIRE01-03 are shared by every damaged building.
+
 ## Build-up animation from artist frames
 
 ```
