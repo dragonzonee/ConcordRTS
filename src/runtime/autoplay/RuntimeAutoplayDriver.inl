@@ -148,8 +148,24 @@ const WorldObjectInstance* autoplayObjectById(const RuntimeWindowState& state, i
 
 // Finds a screen point inside the map viewport that the game itself maps to
 // `cell` (the inverse of approximateCellFromScreenPoint, by local search).
-std::optional<POINT> autoplayScreenPointForCell(const RuntimeWindowState& state, const RECT& viewport, RuntimeCellPoint cell) {
-    const POINT guess = runtimeScreenPointForCell(state, viewport, cell, 0);
+// Terrain height of a cell (0 when unknown); cells on hills project higher.
+int autoplayCellLevel(const RuntimeWindowState& state, RuntimeCellPoint cell) {
+    const auto it = state.terrainByCell.find(runtimeCellKey(cell.x, cell.y));
+    return (it != state.terrainByCell.end() && it->second) ? it->second->level : 0;
+}
+
+// Screen estimate for a cell, including its terrain height.
+POINT autoplayCellEstimate(const RuntimeWindowState& state, const RECT& viewport, RuntimeCellPoint cell) {
+    return runtimeScreenPointForCell(state, viewport, cell, autoplayCellLevel(state, cell));
+}
+
+// Exact hit when one exists; otherwise (`allowNearest`) the screen point whose
+// picked cell is closest to `cell` (shroud can hide the exact surface).
+std::optional<POINT> autoplayScreenPointForCell(const RuntimeWindowState& state, const RECT& viewport,
+    RuntimeCellPoint cell, bool allowNearest = false, int* nearestError = nullptr) {
+    const POINT guess = autoplayCellEstimate(state, viewport, cell);
+    std::optional<POINT> nearest;
+    int nearestDist = INT_MAX;
     for (int radius = 0; radius <= 180; radius += 3) {
         for (int dy = -radius; dy <= radius; dy += 3) {
             for (int dx = -radius; dx <= radius; dx += 3) {
@@ -157,11 +173,14 @@ std::optional<POINT> autoplayScreenPointForCell(const RuntimeWindowState& state,
                 const POINT p{guess.x + dx, guess.y + dy};
                 if (p.x <= viewport.left || p.x >= viewport.right || p.y <= viewport.top || p.y >= viewport.bottom) continue;
                 const POINT c = approximateCellFromScreenPoint(state, viewport, p);
-                if (c.x == cell.x && c.y == cell.y) return p;
+                if (c.x == cell.x && c.y == cell.y) { if (nearestError) *nearestError = 0; return p; }
+                const int d = std::max(std::abs(c.x - cell.x), std::abs(c.y - cell.y));
+                if (d < nearestDist) { nearestDist = d; nearest = p; }
             }
         }
     }
-    return std::nullopt;
+    if (nearestError) *nearestError = nearestDist;
+    return allowNearest ? nearest : std::nullopt;
 }
 
 // ---------------------------------------------------------------- conditions
@@ -452,7 +471,7 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
         if (run.phase == 1) { lookAt(*cell); run.phase = 2; return true; }
         // Find a screen point whose placement preview lands exactly on `cell`.
         const RuntimeStructureFootprint footprint = runtimeStructureFootprintForBuildItem(state, *item);
-        const POINT guess = runtimeScreenPointForCell(state, viewport, *cell, 0);
+        const POINT guess = autoplayCellEstimate(state, viewport, *cell);
         std::optional<POINT> hit;
         for (int radius = 0; radius <= 120 && !hit; radius += 3)
             for (int dy = -radius; dy <= radius && !hit; dy += 3)
@@ -563,9 +582,12 @@ bool tickRuntimeAutoplay(RuntimeWindowState& state, HWND window) {
             run.phase = 1;
             return true;
         }
-        std::optional<POINT> p = autoplayScreenPointForCell(state, viewport, {x, y});
+        int error = 0;
+        std::optional<POINT> p = autoplayScreenPointForCell(state, viewport, {x, y}, true, &error);
+        if (p && error > 0)
+            autoplayLog(run, state, "     exact cell not pickable; nearest pick is " + std::to_string(error) + " cell(s) off");
         if (!p) {
-            const POINT guess = runtimeScreenPointForCell(state, viewport, {x, y}, 0);
+            const POINT guess = autoplayCellEstimate(state, viewport, {x, y});
             const POINT back = approximateCellFromScreenPoint(state, viewport, guess);
             std::ostringstream why;
             why << "cell " << x << "," << y << " not found on screen; estimate " << guess.x << "," << guess.y
