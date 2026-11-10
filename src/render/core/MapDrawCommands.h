@@ -176,7 +176,11 @@ public:
                     ||((c.flags&2U)&&!region(c.auxiliary,256)))return false;
             } else if(kind==3) {if(c.flags>1||c.parameter>255||(c.flags&&!region(c.auxiliary,static_cast<std::uint64_t>(c.width)*c.height)))return false;}
             else if(kind==6) {if(c.flags>1||(c.flags&&!region(c.auxiliary,static_cast<std::uint64_t>(c.width)*c.height)))return false;}
-            else if(kind==1) {if(c.flags>1||(c.flags&&!region(c.auxiliary,static_cast<std::uint64_t>(c.width)*c.height)))return false;}
+            else if(kind==1) {
+                // flags: 1 = masked, 3 = masked HD (offset holds width*S x height*S words)
+                const auto s=static_cast<std::uint64_t>(hd::hdRenderScale());
+                if((c.flags>1&&c.flags!=3)||(c.flags==3&&(s<2||!region(c.offset,static_cast<std::uint64_t>(c.width)*c.height*4*s*s)))
+                    ||(c.flags&&!region(c.auxiliary,static_cast<std::uint64_t>(c.width)*c.height)))return false;}
             else if(c.flags)return false;
         }
         return savedCount==0;

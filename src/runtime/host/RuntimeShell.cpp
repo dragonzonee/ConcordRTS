@@ -18007,6 +18007,28 @@ bool drawRuntimeIndexedImage(
                 c.parameter = opaque ? 0U : static_cast<std::uint32_t>(std::min(255, sourceAlpha * 255 / runtimeIndexedOpaqueAlpha));
                 c.offset = list->internValues<std::uint32_t>(bgra);
                 c.auxiliary = list->intern(mask);
+                // HD pack for this image (e.g. a sidebar cameo) drawn at its own
+                // size: carry the S-times pixels (flag 2), same dim/grey as 1x.
+                const int hdScale = concord::render::hd::hdRenderScale();
+                const auto* hd = opaque && hdScale > 1 && drawWidth == image.width && drawHeight == image.height
+                    ? concord::render::hd::hdSpriteFramePixels(image.sourcePath, image.frameIndex, image.offsetX,
+                        image.offsetY, image.width, image.height, image.globalWidth, image.globalHeight)
+                    : nullptr;
+                if (hd) {
+                    const std::size_t count = area * static_cast<std::size_t>(hdScale) * static_cast<std::size_t>(hdScale);
+                    std::vector<std::uint32_t> pixels(hd->data.begin(), hd->data.begin() + static_cast<std::ptrdiff_t>(count));
+                    if (!enabled) {
+                        for (auto& p : pixels) {
+                            const unsigned bl = p & 255U, gr = (p >> 8) & 255U, rd = (p >> 16) & 255U;
+                            const RuntimePaletteColor shown = displayColor(RuntimePaletteColor{
+                                static_cast<unsigned char>(rd), static_cast<unsigned char>(gr), static_cast<unsigned char>(bl)});
+                            p = static_cast<std::uint32_t>(shown.b) | (static_cast<std::uint32_t>(shown.g) << 8)
+                                | (static_cast<std::uint32_t>(shown.r) << 16);
+                        }
+                    }
+                    c.offset = list->internValues<std::uint32_t>(pixels);
+                    c.flags = 3;
+                }
                 (void)native->emit(c);
             } catch (...) {
                 native->reject("indexed-translucent-budget");

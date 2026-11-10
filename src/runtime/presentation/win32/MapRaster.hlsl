@@ -86,6 +86,12 @@ uint4 compose(int2 p,uint first,uint last,uint4 color) {
                 (resources.Load(c.palette+color.z*4U)>>16U)&255U);continue;
         }
         uint2 local=uint2(p-c.origin);uint4 source;
+        if(c.kind==1U&&c.flags==3U){
+            // HD image (e.g. sidebar cameo): 1x mask, S-times BGRA sampled at the sub-pixel
+            if(byteAt(c.auxiliary+local.y*c.width+local.x)==0U)continue;
+            uint at=(local.y*gHdScale+uint(gHdSub.y))*c.width*gHdScale+local.x*gHdScale+uint(gHdSub.x);
+            color=unpack(resources.Load(c.offset+at*4U));continue;
+        }
         if((c.kind==6U||c.kind==1U||c.kind==3U)&&c.flags==1U&&byteAt(c.auxiliary+local.y*c.width+local.x)==0U)continue;
         if(c.kind==11U){uint value=wordAt(c.offset+local.y*c.stride+local.x*4U);color=unpack((value&0x80000000U)!=0U?resources.Load(c.palette+(value&255U)*4U):value);continue;}
         if(c.kind==13U){uint mask=byteAt(c.offset+local.y*c.stride+local.x);if(mask==0U)continue;uint alpha=(c.flags&4U)!=0U?mask:(c.flags&1U)!=0U?128U:max(1U,(mask*128U+127U)/255U);

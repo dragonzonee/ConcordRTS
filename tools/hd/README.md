@@ -52,6 +52,20 @@ art instead of being kept from the earlier conversion. Used to make the
 finished Power Plant match the last frame of the artist build-up (the source is
 that frame, cut out). Copy the anim and its pack to `gapowr_a` afterwards.
 
+## Sidebar icon (cameo)
+
+```
+python tools/hd/make_hd_cameo.py --cameo <powricon.shp> --palette <cameo.pal> ^
+  --art finished.png --box 9 1 51 44 --scale 3 --out local_data/hd
+```
+
+Keeps the original icon's desert background, corner marks and the name label
+baked into localized cameos (laid back on top unchanged); only the old
+building's own pixels are filled in, then the new building is fitted into
+`--box`. Writes `art/powricon.shp` (cameo palette) and `powricon.hdspr`; the
+sidebar draws the HD pixels at `HdScale` (masked HD image command, dimmed or
+greyed like 1x when the item is unavailable).
+
 ## Build-up animation from artist frames
 
 ```
