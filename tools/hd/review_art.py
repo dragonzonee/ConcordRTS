@@ -25,6 +25,7 @@ import json
 import os
 import re
 import struct
+import time
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -80,6 +81,17 @@ class Originals:
         self.rows = {}
         for r in csv.DictReader(open(inventory)):
             self.rows.setdefault(r["name"].upper(), []).append(r)
+        # rules IDs (AMRADR, ATESLA, ...) -> their sprite (Image=) name
+        self.image_of = {}
+        rules = os.path.join(exports, "ra2md", "localmd", "rulesmd.ini")
+        if os.path.exists(rules):
+            sec = None
+            for raw in open(rules, encoding="latin-1"):
+                line = raw.split(";")[0].strip()
+                if line.startswith("[") and "]" in line:
+                    sec = line[1:line.index("]")].strip().upper()
+                elif sec and line.upper().startswith("IMAGE="):
+                    self.image_of[sec] = line.split("=", 1)[1].strip().upper()
         pals = os.path.join(exports, "palettes")
         self.pal = {k: read_pal(os.path.join(pals, f)) for k, f in
                     (("unit", "unittem.pal"), ("anim", "anim.pal"), ("cameo", "cameo.pal"))
@@ -175,6 +187,7 @@ def iou(m1, m2):
 def asset_folders(root):
     """Yield (category, side, game_id, path) for every asset folder under root."""
     for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith("_")]      # model scratch (_work, ...) is not a delivery
         imgs = [f for f in files if f.lower().endswith(IMG_EXT)]
         if not imgs:
             continue
@@ -203,8 +216,13 @@ def review_asset(cat, side, gid, path, rel, originals):
     if gid != gid.upper() or not re.match(r"^[A-Z0-9_]+$", gid):
         issues.append("folder name '%s' is not a game ID" % gid)
     rec = originals.find(gid)
-    if not rec:
+    if not rec and gid in originals.image_of and originals.find(originals.image_of[gid]):
+        sprite = originals.image_of[gid]
+        issues.append("folder named by the unit ID %s; the sprite is %s (rename the folder to %s)" % (gid, sprite, sprite))
+        rec = originals.find(sprite)
+    elif not rec:
         issues.append("no original sprite named %s (check the ID against shp_inventory.csv)" % gid)
+    is_anim_layer = cat == "buildings" and any(f.lower().startswith("frame_") for f in files)
     orig_frames = int(rec["frames"]) if rec else None
     orig_canvas = (int(rec["width"]), int(rec["height"])) if rec else None
 
@@ -258,8 +276,12 @@ def review_asset(cat, side, gid, path, rel, originals):
     main_stem = {"icons": "icon", "loading": "screen"}.get(cat)
     if cat == "buildings":
         main_stem = "finished" if file_for("finished") else next((os.path.splitext(f)[0] for f in files if f.lower().startswith("finished_")), None)
-    if not main_stem and seq:
-        main_stem = seq[len(seq) // 2]
+    if (not main_stem or is_anim_layer) and seq:
+        # the frame with the most content (some original frames are empty on purpose)
+        def content(stem):
+            arr = load_rgba(file_for(stem))
+            return int(subject_mask(arr, background_kind(arr)).sum())
+        main_stem = max(seq[:: max(1, len(seq) // 8)], key=content)
     main = file_for(main_stem) if main_stem else None
     main_mask = None
     if main:
@@ -275,7 +297,7 @@ def review_asset(cat, side, gid, path, rel, originals):
         if b:
             bw, bh = b[2] - b[0], b[3] - b[1]
             metrics["subject"] = "%dx%d" % (bw, bh)
-            if cat == "buildings" and max(bw, bh) < 1500:
+            if cat == "buildings" and not is_anim_layer and max(bw, bh) < 1500:
                 issues.append("building is %d px across, needs >= 1500" % max(bw, bh))
             if cat == "icons" and a.shape[1] < 600:
                 issues.append("icon is %d px wide, needs >= 600" % a.shape[1])
@@ -287,7 +309,7 @@ def review_asset(cat, side, gid, path, rel, originals):
                 issues.append("%s: subject touches the image edge (cropped?)" % os.path.basename(main))
         else:
             issues.append("%s: empty image" % os.path.basename(main))
-        if cat == "buildings":
+        if cat == "buildings" and not is_anim_layer:
             rf = red_fraction(a, mask)
             metrics["team_red"] = round(rf, 4)
             if side != "civilian" and rf < 0.005:
@@ -302,12 +324,24 @@ def review_asset(cat, side, gid, path, rel, originals):
     if len(seq) >= 2:
         sizes, bottoms, centres, means, sharp, areas = set(), [], [], [], [], []
         masks = []
+        orig_frames_px = None
+        if rec and seq[0].startswith("frame_"):
+            try:
+                orig_frames_px = read_shp(os.path.join(originals.exports, rec["file"]))[2]
+            except Exception:
+                orig_frames_px = None
+        empty_bad = []
         for s in seq:
             fa = load_rgba(file_for(s))
             bg = background_kind(fa)
             m = subject_mask(fa, bg)
             sizes.add(fa.shape[:2])
             bx = bbox(m)
+            if orig_frames_px is not None:
+                n = int(s.split("_")[1])
+                if n < len(orig_frames_px):
+                    if not m.any() and orig_frames_px[n].any():
+                        empty_bad.append(n)
             if bx:
                 bottoms.append(bx[3] / float(fa.shape[0]))
                 ys, xs = np.where(m)
@@ -318,6 +352,8 @@ def review_asset(cat, side, gid, path, rel, originals):
             masks.append(m)
         if len(sizes) > 1:
             issues.append("frames have different sizes: %s" % sorted(sizes)[:3])
+        if empty_bad:
+            issues.append("frames empty where the original has content: %s" % empty_bad[:10])
         if sharp:
             # judge only frames with a real subject (tiny first/last effect frames are soft by nature)
             big = [s for s, ar in zip(sharp, areas) if ar >= 0.25 * max(areas)]
@@ -417,7 +453,13 @@ def main():
             stamp = folder_stamp(path)
             if state.get(key) == stamp:
                 continue
-            r = review_asset(cat, side, gid, path, rel, originals)
+            if time.time() - stamp < 90:
+                continue          # still being written: review it next run
+            try:
+                r = review_asset(cat, side, gid, path, rel, originals)
+            except (OSError, ValueError, SyntaxError) as e:
+                print("skipped %s (unreadable, retry next run): %s" % (key, e))
+                continue
             r["root"] = root
             results.append(r)
             by_id.setdefault(gid, []).append(r)
@@ -431,8 +473,11 @@ def main():
                 all_entries.append(match[0])
             else:
                 for cat, side, g, path, rel in (asset_folders(root) if os.path.isdir(root) else []):
-                    if g == gid:
-                        e = review_asset(cat, side, g, path, rel, originals)
+                    if g == gid or originals.image_of.get(g) == gid or originals.image_of.get(gid) == g:
+                        try:
+                            e = review_asset(cat, side, g, path, rel, originals)
+                        except (OSError, ValueError, SyntaxError):
+                            break
                         e["root"] = root
                         all_entries.append(e)
                         break
